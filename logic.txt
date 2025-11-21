@@ -1,0 +1,1081 @@
+global_rules:
+  - bot_language: "ru"
+  - all_main_messages_should_include_branding_image: true   # "гифка или картинка нашего бота с заголовком"
+  - everywhere_user_continues_using_service:
+      text_must_contain_privacy_and_tos_notice: true
+  - storage:
+      - store_user_phone_encrypted_on_server: true
+  - registration:
+      - use_state_machine: true
+      - if_user_has_incomplete_registration_on_restart:
+          resume_from_last_state: true
+
+screens:
+
+  - id: start_new_user
+    trigger:
+      - command: "/start"
+        condition: "user_is_registered == false"
+    title: "Добро пожаловать в сервис ПОТОК Lite"
+    text: |
+      Краткое описание бота «ПОТОК Lite»:
+      сервис помогает принимать переводы и управлять платежными реквизитами прямо в Telegram.
+
+      Продолжая использование сервиса «ПОТОК Lite», вы соглашаетесь с Политикой конфиденциальности,
+      а также принимаете правила Пользовательского соглашения.
+
+      Подробная информация о боте доступна по ссылкам ниже.
+    buttons:
+      - label: "Информация"
+        type: "inline"
+        action: "open_url"
+        target: "<url_информации_о_боте>"
+      - label: "Обзор бота"
+        type: "inline"
+        action: "open_url"
+        target: "<url_обзора_бота>"
+      - label: "Начать пользоваться"
+        type: "reply"
+        action: "goto"
+        target: "registration_step_1"
+
+  - id: start_registered_user
+    trigger:
+      - command: "/start"
+        condition: "user_is_registered == true"
+    title: "Личный кабинет"
+    text: |
+      Ваши платежные реквизиты:
+
+      • Список банковских карт (каждая карта отображается маской вида «Карта **** 1234» и эмблемой банка).
+      • Список номеров телефонов, привязанных к Системе быстрых платежей (маски вида «Телефон *** ** 55» с эмблемами банков).
+
+      Краткая статистика:
+      • Сумма полученных переводов за текущий месяц.
+      • Сумма отправленных переводов за текущий месяц.
+    buttons:
+      - label: "Статистика переводов"
+        type: "reply"
+        action: "goto"
+        target: "personal_cabinet_stats"
+      - label: "Квитанции"
+        type: "reply"
+        action: "goto"
+        target: "receipts_entry_point"
+      - label: "Настройки"
+        type: "reply"
+        action: "goto"
+        target: "settings_root"
+      - label: "Информация"
+        type: "reply"
+        action: "goto"
+        target: "info_main"
+
+  - id: info_main
+    trigger:
+      - button: "Информация"
+    title: "Информация о сервисе ПОТОК Lite"
+    text: |
+      Краткая информация о том, что делает бот «ПОТОК Lite» и как им пользоваться.
+
+      Продолжая использование сервиса «ПОТОК Lite»,
+      вы соглашаетесь с Политикой конфиденциальности
+      и принимаете правила Пользовательского соглашения.
+    buttons:
+      - label: "Обзор бота"
+        type: "inline"
+        action: "open_url"
+        target: "<url_обзора_бота>"
+      - label: "Инструкция"
+        type: "inline"
+        action: "open_url"
+        target: "<url_инструкции>"
+      - label: "Политика конфиденциальности"
+        type: "inline"
+        action: "open_url"
+        target: "<url_политики_конфиденциальности>"
+      - label: "Пользовательское соглашение"
+        type: "inline"
+        action: "open_url"
+        target: "<url_пользовательского_соглашения>"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+
+  #######################################################
+  # РЕГИСТРАЦИЯ ПОЛЬЗОВАТЕЛЯ (ПОСЛЕ "НАЧАТЬ ПОЛЬЗОВАТЬСЯ")
+  #######################################################
+
+  - id: registration_step_1
+    trigger:
+      - button: "Начать пользоваться"
+      - state_resume: "registration_step_1"
+    title: "Регистрация. Шаг 1 из 3"
+    text: |
+      Для продолжения работы боту необходим ваш номер телефона.
+      Он будет храниться на нашем сервере в зашифрованном виде.
+
+      Вы можете нажать кнопку «Отправить номер телефона» (отправка контакта Telegram)
+      или отправить номер телефона обычным сообщением.
+    buttons:
+      - label: "Отправить номер телефона"
+        type: "keyboard_contact"
+        action: "request_contact_and_goto"
+        target: "registration_step_2"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "start_new_user"
+    on_text_input:
+      validation: "phone_number"
+      if_valid:
+        action: "store_phone_and_goto"
+        target: "registration_step_2"
+      if_invalid:
+        action: "send_error"
+        error_text: "Пожалуйста, отправьте корректный номер телефона или воспользуйтесь кнопкой."
+
+  - id: registration_step_2_choose_banks
+    title: "2/3. Выберите ваш банк (или несколько)"
+    text: |
+      Вы ввели номер телефона: {phone_number_formatted}.
+
+      На какие банки вы хотите принимать платежи по этому номеру?
+      Платежи будут поступать через Систему быстрых платежей.
+
+      Можно выбрать несколько банков.
+      Позже вы сможете добавить банковскую карту или интеграцию с платёжным сервисом.
+    buttons:
+      - label: "Сбербанк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "sber" }
+      - label: "Тинькофф Банк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "tinkoff" }
+      - label: "ВТБ"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "vtb" }
+      - label: "Альфа-Банк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "alfa" }
+      - label: "Московский Кредитный Банк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "mkb" }
+      - label: "Промсвязьбанк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "psb" }
+      - label: "Газпромбанк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "gazprom" }
+      - label: "Почта Банк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "pochta" }
+      - label: "Россельхозбанк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "rshb" }
+      - label: "Совкомбанк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "sovcom" }
+      - label: "OZON Банк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "ozon" }
+      - label: "Wildberries Банк"
+        type: "toggle"
+        action: "toggle_bank_for_phone"
+        payload: { bank_code: "wb" }
+      - label: "Нет нужного банка"
+        type: "reply"
+        action: "goto"
+        target: "no_such_bank_feedback"
+      - label: "Далее ➡"
+        type: "reply"
+        action: "goto_if"
+        conditions:
+          - if: "selected_banks_for_phone_count > 0"
+            target: "registration_step_3_choose_main_bank"
+          - else: "stay_and_show_error"
+        error_text_if_else: "Выберите хотя бы один банк или нажмите «Нет нужного банка»."
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "registration_step_1"
+
+  - id: no_such_bank_feedback
+    title: "Банк не найден"
+    text: |
+      Приносим извинения. Сервис только развивается и ещё не успел добавить все банки.
+
+      Пожалуйста, напишите, какой банк вы хотите видеть в сервисе — мы обязательно рассмотрим возможность его добавления.
+    buttons:
+      - label: "Начать заново"
+        type: "reply"
+        action: "goto"
+        target: "registration_step_1"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "registration_step_2_choose_banks"
+    on_text_input:
+      action: "send_feedback_to_support_and_thank_user"
+      next:
+        text: |
+          Спасибо за помощь! Мы сообщим, когда добавим этот банк.
+          За новостями проекта можно следить в специальном канале.
+        buttons:
+          - label: "Начать заново"
+            type: "reply"
+            action: "goto"
+            target: "registration_step_1"
+          - label: "Назад"
+            type: "reply"
+            action: "goto"
+            target: "registration_step_2_choose_banks"
+
+  - id: registration_step_3_choose_main_bank
+    title: "3/3. Выберите основной банк"
+    text: |
+      Вы ввели номер телефона: {phone_number_formatted}.
+      Выбранные банки для этого номера: {selected_bank_names}.
+
+      Вы можете:
+      • выбрать основной банк для этого номера (по умолчанию платежи будут приходить на него),
+      • пропустить этот шаг и выбрать основной банк позже
+        (если основной банк не выбран, бот при каждом запросе будет спрашивать,
+         на какой банк вы хотите получить перевод).
+    buttons:
+      - label: "<банк 1>"
+        type: "radio"
+        action: "set_main_bank_for_phone"
+        payload: { bank_code: "bank_1" }
+      - label: "<банк 2>"
+        type: "radio"
+        action: "set_main_bank_for_phone"
+        payload: { bank_code: "bank_2" }
+      # ... динамический список по selected_bank_names
+      - label: "Пропустить шаг ➡"
+        type: "reply"
+        action: "goto"
+        target: "registration_finish"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "registration_step_2_choose_banks"
+
+  - id: registration_finish
+    title: "Регистрация завершена"
+    text: |
+      Регистрация успешно завершена.
+      Теперь вы можете принимать переводы в личных чатах в Telegram, используя сохранённые реквизиты.
+    buttons:
+      - label: "Перейти в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+
+  #######################################
+  # КВИТАНЦИИ (АРХИВ ПЛАТЕЖЕЙ)
+  #######################################
+
+  - id: receipts_entry_point
+    trigger:
+      - button: "Квитанции"
+    title: "Квитанции"
+    logic:
+      - if: "user_has_any_receipts == false"
+        goto: "receipts_empty"
+      - else:
+        goto: "receipts_has_any"
+
+  - id: receipts_empty
+    title: "Квитанции"
+    text: |
+      В этом разделе можно получить полный архив квитанций по входящим и исходящим переводам.
+      На данный момент для вас нет ни одной квитанции.
+    buttons:
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+
+  - id: receipts_has_any
+    title: "Квитанции"
+    text: |
+      В этом разделе можно получить полный архив квитанций по входящим и исходящим переводам.
+    buttons:
+      - label: "Получить архив"
+        type: "reply"
+        action: "generate_and_send_receipts_archive"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+    result_on_generate:
+      text: "Вот полный архив квитанций по вашим входящим и исходящим переводам."
+      # дальше бот отправляет файл (zip/pdf и т.п.)
+
+  #######################################
+  # НАСТРОЙКИ
+  #######################################
+
+  - id: settings_root
+    title: "Настройки"
+    text: |
+      Ваши платежные реквизиты:
+      • банковские карты (маски и эмблемы банков),
+      • номера телефонов для Системы быстрых платежей.
+
+      Выберите раздел для настройки реквизитов и поведения бота.
+    buttons:
+      - label: "Номера телефонов"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+      - label: "Банковские карты"
+        type: "reply"
+        action: "goto"
+        target: "settings_cards_list"
+      - label: "Платежные интеграции"
+        type: "reply"
+        action: "goto"
+        target: "settings_integrations_placeholder"
+      - label: "Быстрый ответ"
+        type: "reply"
+        action: "goto"
+        target: "quick_reply_main"
+      - label: "Назад в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+
+  # ПЛАТЕЖНЫЕ ИНТЕГРАЦИИ (ПОКА ЗАГЛУШКА)
+  - id: settings_integrations_placeholder
+    title: "Платежные интеграции"
+    text: |
+      В дальнейшем здесь появятся настройки интеграции с платёжными сервисами.
+    buttons:
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "settings_root"
+
+  #######################################
+  # НАСТРОЙКИ: НОМЕРА ТЕЛЕФОНОВ
+  #######################################
+
+  - id: settings_phones_list
+    title: "Ваши номера телефонов"
+    text: |
+      Список номеров телефонов, привязанных к вашему аккаунту.
+      Для каждого номера отображается:
+      • маска номера (например, «Телефон *** ** 55»),
+      • список подключённых банков,
+      • при наличии — пометка основного банка для номера.
+    buttons:
+      - label: "Добавить номер"
+        type: "reply"
+        action: "goto"
+        target: "phone_add_step_1"
+      - label: "Выбрать номер для удаления"
+        type: "reply"
+        action: "goto"
+        target: "phone_delete_choose_number"
+      - label: "Удалить или добавить банки к номеру"
+        type: "reply"
+        action: "goto"
+        target: "phone_edit_banks_choose_number"
+      - label: "Основной банк для номера"
+        type: "reply"
+        action: "goto"
+        target: "phone_edit_main_bank_choose_number"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "settings_root"
+
+  # Удаление номера телефона
+  - id: phone_delete_choose_number
+    title: "Выберите номер для удаления"
+    text: |
+      Выберите номер телефона, который хотите удалить.
+    buttons_dynamic:
+      source: "user_phone_numbers"
+      template:
+        label: "Удалить {phone_masked}"
+        type: "reply"
+        action: "goto"
+        target: "phone_delete_confirm"
+        payload: { phone_id: "{phone_id}" }
+    buttons_static:
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+
+  - id: phone_delete_confirm
+    title: "Подтвердите действие"
+    text: |
+      Вы действительно хотите удалить номер телефона {phone_full_formatted}?
+    buttons:
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+      - label: "Удалить номер телефона"
+        type: "reply"
+        action: "delete_phone_and_notify"
+        next_target: "phone_delete_result"
+
+  - id: phone_delete_result
+    title: "Номер удалён"
+    text: |
+      Номер телефона {phone_full_formatted} удалён.
+    buttons:
+      - label: "Назад в настройки"
+        type: "reply"
+        action: "goto"
+        target: "settings_root"
+      - label: "Назад в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+
+  # Добавление номера телефона (4 шага)
+
+  - id: phone_add_step_1
+    title: "Добавление номера телефона: шаг 1 из 4"
+    text: |
+      Отправьте номер телефона, который хотите привязать.
+    buttons:
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+      - label: "Назад в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+    on_text_input:
+      validation: "phone_number"
+      if_valid:
+        action: "store_temp_phone_and_goto"
+        target: "phone_add_step_2"
+      if_invalid:
+        action: "send_error"
+        error_text: "Пожалуйста, отправьте корректный номер телефона."
+
+  - id: phone_add_step_2
+    title: "Добавление номера телефона: шаг 2 из 4"
+    text: |
+      На номер {phone_full_formatted} отправлено SMS с кодом подтверждения.
+      Отправьте этот код боту.
+    buttons:
+      - label: "Отправить код ещё раз (с обратным отсчётом 60 секунд)"
+        type: "reply"
+        action: "resend_sms_code_with_timer"
+      - label: "Написать в поддержку"
+        type: "inline"
+        action: "open_url"
+        target: "<url_поддержки>"
+      - label: "Назад в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+    on_text_input:
+      validation: "sms_code"
+      if_valid:
+        action: "confirm_phone_and_goto"
+        target: "phone_add_step_3_choose_banks"
+      if_invalid:
+        action: "send_error"
+        error_text: "Неверный код. Попробуйте ещё раз."
+
+  - id: phone_add_step_3_choose_banks
+    title: "Выберите ваш банк (или несколько). Шаг 3 из 4"
+    text: |
+      Вы ввели номер: {phone_full_formatted}.
+      Выберите банки, на которые хотите получать оплату по этому номеру через Систему быстрых платежей.
+
+      Можно отметить несколько банков.
+    # список банков такой же, как в registration_step_2_choose_banks
+    buttons:
+      # те же toggle-кнопки банков
+      - label: "Нет нужного банка"
+        type: "reply"
+        action: "goto"
+        target: "no_such_bank_feedback_phone_add"
+      - label: "Далее ➡"
+        type: "reply"
+        action: "goto_if"
+        conditions:
+          - if: "selected_banks_for_phone_count > 0"
+            target: "phone_add_step_4_choose_main_bank"
+          - else: "stay_and_show_error"
+        error_text_if_else: "Выберите хотя бы один банк или нажмите «Нет нужного банка»."
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+
+  - id: no_such_bank_feedback_phone_add
+    title: "Банк не найден"
+    text: |
+      Приносим извинения. Сервис ещё не успел добавить все банки.
+
+      Напишите, какой банк вы хотите видеть в сервисе — мы рассмотрим возможность его добавления.
+    buttons:
+      - label: "Начать заново добавление номера"
+        type: "reply"
+        action: "goto"
+        target: "phone_add_step_1"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "phone_add_step_3_choose_banks"
+    on_text_input:
+      action: "send_feedback_to_support_and_thank_user"
+
+  - id: phone_add_step_4_choose_main_bank
+    title: "Выберите ваш основной банк. Шаг 4 из 4"
+    text: |
+      Вы ввели номер: {phone_full_formatted}.
+      Выбранные банки: {selected_bank_names}.
+
+      Вы можете:
+      • выбрать основной банк для этого номера;
+      • пропустить выбор основного банка и задавать банк при каждом запросе.
+    buttons:
+      - label: "<банк 1>"
+        type: "radio"
+        action: "set_main_bank_for_phone"
+        payload: { bank_code: "bank_1" }
+      # ... остальные
+      - label: "Пропустить шаг ➡"
+        type: "reply"
+        action: "goto"
+        target: "phone_add_finish"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "phone_add_step_3_choose_banks"
+
+  - id: phone_add_finish
+    title: "Номер добавлен"
+    text: |
+      Номер {phone_full_formatted} добавлен.
+      Теперь вы можете принимать переводы на этот номер в личных чатах в Telegram.
+    buttons:
+      - label: "К списку номеров телефонов"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+
+  # Изменение списка банков для номера
+
+  - id: phone_edit_banks_choose_number
+    title: "Выбор номера"
+    text: |
+      Выберите номер телефона, для которого хотите изменить список банков.
+    buttons_dynamic:
+      source: "user_phone_numbers"
+      template:
+        label: "{phone_masked}"
+        type: "reply"
+        action: "goto"
+        target: "phone_edit_banks_for_selected"
+        payload: { phone_id: "{phone_id}" }
+    buttons_static:
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+
+  - id: phone_edit_banks_for_selected
+    title: "Выберите банки"
+    text: |
+      Вы выбрали номер: {phone_full_formatted}.
+
+      Выберите банки, на которые хотите получать оплату по этому номеру.
+      Можно отметить несколько банков.
+    buttons:
+      # те же toggle-кнопки банков, плюс:
+      - label: "Нет нужного банка"
+        type: "reply"
+        action: "goto"
+        target: "no_such_bank_feedback_phone_edit"
+      - label: "Далее ➡"
+        type: "reply"
+        action: "apply_bank_changes_and_goto"
+        target: "phone_edit_banks_result"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "phone_edit_banks_choose_number"
+
+  - id: no_such_bank_feedback_phone_edit
+    title: "Банк не найден"
+    text: |
+      Приносим извинения. Напишите, какой банк вы хотите видеть в сервисе.
+    buttons:
+      - label: "В список номеров телефонов"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "phone_edit_banks_for_selected"
+    on_text_input:
+      action: "send_feedback_to_support_and_thank_user"
+
+  - id: phone_edit_banks_result
+    title: "Настройки обновлены"
+    text: |
+      Список банков для номера {phone_full_formatted} обновлён.
+    buttons:
+      - label: "В номера телефонов"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+
+  # Изменение основного банка для номера
+
+  - id: phone_edit_main_bank_choose_number
+    title: "Выбор номера"
+    text: |
+      Выберите номер телефона, для которого хотите изменить основной банк.
+    buttons_dynamic:
+      source: "user_phone_numbers"
+      template:
+        label: "{phone_masked}"
+        type: "reply"
+        action: "goto"
+        target: "phone_edit_main_bank_for_selected"
+        payload: { phone_id: "{phone_id}" }
+    buttons_static:
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+
+  - id: phone_edit_main_bank_for_selected
+    title: "Выберите основной банк"
+    text: |
+      Вы выбрали номер: {phone_full_formatted}.
+      Текущий основной банк отмечен галочкой.
+
+      Выберите основной банк для этого номера.
+    buttons_dynamic:
+      source: "banks_for_selected_phone"
+      template:
+        label: "{bank_name}{main_mark_if_any}"
+        type: "radio"
+        action: "set_main_bank_for_phone"
+        payload: { bank_code: "{bank_code}" }
+    buttons_static:
+      - label: "В номера телефонов"
+        type: "reply"
+        action: "goto"
+        target: "settings_phones_list"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "phone_edit_main_bank_choose_number"
+
+  #######################################
+  # НАСТРОЙКИ: БАНКОВСКИЕ КАРТЫ
+  #######################################
+
+  - id: settings_cards_list
+    title: "Ваши банковские карты"
+    text: |
+      Список банковских карт, привязанных к вашему аккаунту.
+      Для каждой карты отображается маска (например, «Карта **** 1234») и эмблема банка.
+    buttons:
+      - label: "Добавить карту"
+        type: "reply"
+        action: "goto"
+        target: "card_add_step_1"
+      - label: "Выбрать карту для удаления"
+        type: "reply"
+        action: "goto"
+        target: "card_delete_choose"
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "settings_root"
+
+  - id: card_add_step_1
+    title: "Добавление банковской карты"
+    text: |
+      Отправьте номер вашей банковской карты.
+
+      Важно: по этому номеру карты вам будут переводить денежные средства.
+      Будьте внимательны при вводе номера.
+    buttons:
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "settings_cards_list"
+      - label: "Назад в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+    on_text_input:
+      validation: "card_number"
+      if_valid:
+        action: "store_card_and_detect_bank_and_payment_system"
+        next_target: "card_add_success"
+      if_invalid:
+        action: "send_error"
+        error_text: "Пожалуйста, отправьте корректный номер банковской карты."
+
+  - id: card_add_success
+    title: "Карта добавлена"
+    text: |
+      Банковская карта {card_payment_system} **** {card_last4} добавлена.
+      Теперь вы можете принимать на неё оплату.
+
+      Рекомендуется пройти верификацию данной карты,
+      чтобы исключить ошибку при вводе номера. Для этого потребуется любая другая действующая карта.
+    buttons:
+      - label: "Подробнее о верификации"
+        type: "inline"
+        action: "open_url"
+        target: "<url_описания_верификации>"
+      - label: "Верифицировать карту **** {card_last4}"
+        type: "reply"
+        action: "goto"
+        target: "card_verify_instructions"
+      - label: "Назад в настройки"
+        type: "reply"
+        action: "goto"
+        target: "settings_cards_list"
+      - label: "Назад в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+
+  - id: card_verify_instructions
+    title: "Верификация банковской карты"
+    text: |
+      Чтобы верифицировать карту {card_payment_system} **** {card_last4}, выполните следующие действия:
+
+      1) Нажмите кнопку «Верифицировать».
+      2) Выберите банк, через который хотите пройти верификацию.
+         Откроется банковское приложение или веб-кабинет выбранного банка.
+      3) Переведите с карты выбранного банка на верифицируемую карту любую небольшую сумму.
+      4) Если перевод прошёл успешно, отправьте боту квитанцию о переводе
+         (скриншот или файл из банковского приложения).
+
+      После проверки квитанции карта будет отмечена как верифицированная.
+    buttons:
+      - label: "Верифицировать"
+        type: "reply"
+        action: "start_verification_flow_wait_receipt"
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "settings_cards_list"
+      - label: "Назад в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+    on_document_or_photo:
+      action: "check_verification_receipt"
+      if_success:
+        goto: "card_verify_success"
+      if_fail:
+        send_error: "Не удалось подтвердить квитанцию. Попробуйте ещё раз или обратитесь в поддержку."
+
+  - id: card_verify_success
+    title: "Карта верифицирована"
+    text: |
+      Карта {card_payment_system} **** {card_last4} успешно верифицирована.
+    buttons:
+      - label: "Назад в настройки"
+        type: "reply"
+        action: "goto"
+        target: "settings_cards_list"
+      - label: "Назад в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+
+  - id: card_delete_choose
+    title: "Выберите карту для удаления"
+    text: |
+      Выберите карту, которую хотите удалить.
+    buttons_dynamic:
+      source: "user_cards"
+      template:
+        label: "Удалить карту **** {card_last4}"
+        type: "reply"
+        action: "goto"
+        target: "card_delete_confirm"
+        payload: { card_id: "{card_id}" }
+    buttons_static:
+      - label: "Назад"
+        type: "reply"
+        action: "goto"
+        target: "settings_cards_list"
+
+  - id: card_delete_confirm
+    title: "Подтвердите действие"
+    text: |
+      Вы действительно хотите удалить карту **** {card_last4}?
+    buttons:
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "settings_cards_list"
+      - label: "Удалить карту"
+        type: "reply"
+        action: "delete_card_and_notify"
+        next_target: "card_delete_result"
+
+  - id: card_delete_result
+    title: "Карта удалена"
+    text: |
+      Карта **** {card_last4} удалена.
+    buttons:
+      - label: "Назад в настройки"
+        type: "reply"
+        action: "goto"
+        target: "settings_root"
+      - label: "Назад в личный кабинет"
+        type: "reply"
+        action: "goto"
+        target: "start_registered_user"
+
+  #######################################
+  # НАСТРОЙКИ: БЫСТРЫЙ ОТВЕТ ДЛЯ INLINE
+  #######################################
+
+  - id: quick_reply_main
+    title: "Быстрый ответ"
+    text: |
+      Текущие тексты быстрых ответов:
+
+      • Для перевода по номеру телефона:
+        {quick_reply_phone_template}
+
+      • Для перевода по номеру карты:
+        {quick_reply_card_template}
+
+      В тексте обязательны слова «сумма» и «банк».
+      Вместо этих слов при отправке будут подставлены фактическая сумма перевода и название банка.
+    buttons:
+      - label: "Изменить текст для номера телефона"
+        type: "reply"
+        action: "goto"
+        target: "quick_reply_edit_phone"
+      - label: "Изменить текст для карты"
+        type: "reply"
+        action: "goto"
+        target: "quick_reply_edit_card"
+      - label: "Назад в настройки"
+        type: "reply"
+        action: "goto"
+        target: "settings_root"
+
+  - id: quick_reply_edit_phone
+    title: "Изменение быстрого ответа"
+    text: |
+      Текущий текст быстрого ответа для перевода по номеру телефона:
+      {quick_reply_phone_template}
+
+      Отправьте новый текст быстрого ответа.
+      В тексте обязательно должны присутствовать слова «сумма» и «банк».
+      Вместо этих слов в сообщении пользователю будут подставлены фактическая сумма перевода
+      и название банка.
+    buttons:
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "quick_reply_main"
+    on_text_input:
+      validation: "contains_words_sum_and_bank"
+      if_invalid:
+        action: "send_error"
+        error_text: "В тексте должны присутствовать слова «сумма» и «банк»."
+      if_valid:
+        action: "store_temp_quick_reply_phone"
+        next_target: "quick_reply_edit_phone_confirm"
+
+  - id: quick_reply_edit_phone_confirm
+    title: "Изменение быстрого ответа"
+    text: |
+      Текущий текст быстрого ответа для номера телефона:
+      {quick_reply_phone_template_old}
+
+      Новый текст:
+      {quick_reply_phone_template_new}
+
+      Выполнить замену текста?
+    buttons:
+      - label: "Заменить текст"
+        type: "reply"
+        action: "apply_quick_reply_phone_change"
+        next_target: "quick_reply_edit_result"
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "quick_reply_main"
+
+  - id: quick_reply_edit_card
+    title: "Изменение быстрого ответа"
+    text: |
+      Текущий текст быстрого ответа для перевода по номеру карты:
+      {quick_reply_card_template}
+
+      Отправьте новый текст быстрого ответа.
+      В тексте обязательно должны присутствовать слова «сумма» и «банк».
+    buttons:
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "quick_reply_main"
+    on_text_input:
+      validation: "contains_words_sum_and_bank"
+      if_invalid:
+        action: "send_error"
+        error_text: "В тексте должны присутствовать слова «сумма» и «банк»."
+      if_valid:
+        action: "store_temp_quick_reply_card"
+        next_target: "quick_reply_edit_card_confirm"
+
+  - id: quick_reply_edit_card_confirm
+    title: "Изменение быстрого ответа"
+    text: |
+      Текущий текст быстрого ответа для карты:
+      {quick_reply_card_template_old}
+
+      Новый текст:
+      {quick_reply_card_template_new}
+
+      Выполнить замену текста?
+    buttons:
+      - label: "Заменить текст"
+        type: "reply"
+        action: "apply_quick_reply_card_change"
+        next_target: "quick_reply_edit_result"
+      - label: "Отмена"
+        type: "reply"
+        action: "goto"
+        target: "quick_reply_main"
+
+  - id: quick_reply_edit_result
+    title: "Быстрый ответ обновлён"
+    text: |
+      Текст быстрого ответа изменён.
+    buttons:
+      - label: "В настройки"
+        type: "reply"
+        action: "goto"
+        target: "settings_root"
+
+  #######################################
+  # INLINE MODE — СЦЕНАРИИ ОТПРАВКИ ЗАПРОСОВ НА ПЕРЕВОД
+  #######################################
+
+  - id: inline_mode_description
+    # это логическое описание поведения в inline режиме, а не отдельный экран
+    inline_query_patterns:
+      - pattern: "@bot_username"
+        description: |
+          Пользователь вводит имя бота в строке ввода (без суммы и без банка).
+          Бот предлагает несколько вариантов inline-результатов:
+          • запрос перевода по каждому сохранённому номеру телефона (без суммы),
+          • запрос перевода по каждой сохранённой карте (без суммы).
+
+          Пример описания одного результата:
+          Заголовок: «Запросить перевод по номеру {phone_masked} ({main_bank_if_any_or_text_без_банка})».
+          Подзаголовок: «Будет отправлен запрос перевода по номеру телефона {phone_masked}.»
+      - pattern: "@bot_username {amount}"
+        description: |
+          Пользователь указывает сумму, но не указывает банк.
+          Бот предлагает inline-результаты:
+
+          • Для каждого номера телефона:
+            Заголовок: «Запросить перевод {amount} по номеру {phone_masked} ({main_bank_if_any_or_text_без_банка})».
+            Текст итогового сообщения в чат:
+              — для номера с основным банком:
+                «Выполните перевод по номеру телефона:
+                 {phone_full}. Сумма: {amount}. Банк получателя: {main_bank_name}.»
+              — для номера без основного банка:
+                «Выполните перевод по номеру телефона:
+                 {phone_full}. Сумма: {amount}. Уточните банк получателя перевода.»
+
+          • Для каждой карты:
+            Заголовок: «Запросить перевод {amount} на карту **** {card_last4} ({bank_name}).»
+            Текст итогового сообщения:
+              «Выполните перевод на карту **** {card_last4}.
+               Сумма: {amount}. Банк получателя: {bank_name}.»
+      - pattern: "@bot_username {bank_name}"
+        description: |
+          Пользователь указывает название банка, но не указывает сумму.
+          Бот:
+          • фильтрует номера телефонов и карты по тем, у которых в списке банков есть указанный банк;
+          • формирует inline-результаты «Запросить перевод по номеру {phone_masked} ({bank_name})»
+            и «Запросить перевод на карту **** {card_last4} ({bank_name})».
+
+          Итоговое сообщение в чат:
+            — для номера телефона:
+               «Выполните перевод по номеру телефона:
+                {phone_full}. Банк получателя: {bank_name}. Уточните сумму перевода.»
+            — для карты:
+               «Выполните перевод на карту **** {card_last4}.
+                Банк получателя: {bank_name}. Уточните сумму перевода.»
+
+          Если указанный пользователем банк не входит в список банков,
+          привязанных к реквизитам, бот показывает пользователю сообщение об ошибке
+          (например, «Вы не клиент указанного банка») и не отправляет inline-сообщение.
+      - pattern: "@bot_username {amount} {bank_name}"
+        description: |
+          Пользователь указывает сумму и банк.
+          Логика:
+          • бот фильтрует номера телефонов и карты по указанному банку;
+          • формирует inline-результаты «Запросить перевод {amount} по номеру {phone_masked} ({bank_name})»
+            и «Запросить перевод {amount} на карту **** {card_last4} ({bank_name})».
+
+          Итоговое сообщение в чат:
+            — для номера телефона:
+               «Выполните перевод по номеру телефона:
+                {phone_full}. Сумма: {amount}. Банк получателя: {bank_name}.»
+            — для номера телефона без привязки нужного банка:
+               бот не предлагает такой результат.
+            — для карты:
+               «Выполните перевод на карту **** {card_last4}.
+                Сумма: {amount}. Банк получателя: {bank_name}.»
+
+          Если пользователь указал банк, к которому у него нет привязанных реквизитов,
+          бот показывает сообщение об ошибке и не отправляет inline-сообщение.
+
+    inline_result_to_chat_message:
+      description: |
+        При выборе любого inline-результата в целевой чат отправляется сообщение
+        на основе шаблона быстрого ответа (для телефона или карты).
+        В тексте шаблона слова «сумма» и «банк» заменяются:
+        • «сумма» → фактическая сумма {amount}, если сумма была указана; иначе текст «сумма» остаётся или замещается указанием «уточните сумму»;
+        • «банк» → название выбранного банка, если он определён;
+          если банк не определён, используется текст, побуждающий уточнить банк.
+
+        Везде, где нужно, рядом с номером телефона отображается название основного банка,
+        если он задан для этого номера.
+

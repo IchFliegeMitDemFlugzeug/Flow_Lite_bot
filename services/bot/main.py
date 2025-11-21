@@ -1,51 +1,47 @@
-# Импортируем модуль asyncio, чтобы запускать асинхронный код
-import asyncio
+# main.py
 
-# Импортируем тип Bot — объект, представляющий нашего Telegram-бота
-# и умеющий отправлять сообщения, получать апдейты и т.п.
-from aiogram import Bot, Dispatcher
+import asyncio  # Модуль asyncio нужен для запуска асинхронного кода (event loop)
 
-# Импортируем функцию загрузки конфигурации бота (чтение токена из окружения)
-from .config import load_bot_config
+from aiogram import Bot, Dispatcher  # Bot — клиент Telegram, Dispatcher — маршрутизатор апдейтов
+from aiogram.fsm.storage.memory import MemoryStorage  # Хранилище состояний в памяти процесса
+from aiogram.client.default import DefaultBotProperties
 
-# Импортируем функцию, которая зарегистрирует все роутеры (сообщения) в диспетчере
-from .routers import setup_routers
+from .handlers.registration import registration_router  # Импортируем наш роутер с хэндлерами регистрации
+
+# Здесь, как правило, хранят токен бота.
+# В реальном проекте лучше брать его из переменных окружения.
+BOT_TOKEN = "8540412036:AAE5LPyfzrpf0RrNq6MneOAfNzjF1i4JiYI"  # TODO: замените на реальный токен
 
 
-# Определяем асинхронную функцию main — точку входа приложения
 async def main() -> None:
     """
-    Основная функция запуска бота.
-
-    1. Загружает конфигурацию (токен бота).
-    2. Создаёт объект Bot.
-    3. Создаёт Dispatcher.
-    4. Подключает все роутеры (каждый роутер = набор сообщений/экранов).
-    5. Запускает бесконечный опрос сервера Telegram (polling).
+    Главная асинхронная функция приложения.
+    Здесь создаём бота, диспетчер, регистрируем роутеры и запускаем polling.
     """
 
-    # Загружаем конфигурацию (внутри будет проверка, что BOT_TOKEN задан)
-    config = load_bot_config()
+    # Создаём объект Bot.
+    # Аргумент token — строка с токеном, полученным у BotFather.
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="Markdown"),
+    )
 
-    # Создаём объект бота, передавая ему токен из конфигурации
-    bot: Bot = Bot(token=config.token)
+    # Создаём хранилище состояний (FSM).
+    # MemoryStorage хранит всё в оперативной памяти процесса.
+    # Для продакшена обычно используют RedisStorage или БД.
+    storage = MemoryStorage()
 
-    # Создаём объект диспетчера, который будет управлять всеми хэндлерами
-    dp: Dispatcher = Dispatcher()
+    # Создаём Dispatcher — объект, который получает апдейты и раздаёт их хэндлерам.
+    dp = Dispatcher(storage=storage)
 
-    # Передаём диспетчер в функцию setup_routers,
-    # чтобы в нём зарегистрировались все роутеры из папки routers
-    setup_routers(dp)
+    # Регистрируем наш роутер с регистрацией в диспетчере.
+    dp.include_router(registration_router)
 
-    # Запускаем бесконечный опрос сервера Telegram.
-    # dp.start_polling будет получать все входящие апдейты (сообщения, команды и т.п.)
-    # и передавать их обработчикам, которые мы зарегистрировали в роутерах.
+    # Запускаем режим long polling, чтобы бот начал получать апдейты от Telegram.
     await dp.start_polling(bot)
 
 
-# Этот блок выполнится только если файл main.py запустить напрямую как скрипт:
-# python services/bot/main.py
 if __name__ == "__main__":
-    # Запускаем асинхронную функцию main() с помощью asyncio.run.
-    # Это стандартный способ запуска "async def main()" в обычном Python-скрипте.
+    # Стандартная "точка захода" в программу.
+    # asyncio.run запускает нашу main() как корутину в event loop.
     asyncio.run(main())
