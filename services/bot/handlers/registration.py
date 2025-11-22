@@ -44,6 +44,11 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     """
     Старт регистрации: показываем запрос номера телефона (Шаг 1 из 3).
     """
+    user_data = message.from_user.model_dump()  # Получаем объект пользователя из сообщения (from_user)
+    # и сразу превращаем его во ВСЮ доступную инфу (словарь) через .model_dump()
+
+    chat_data = message.chat.model_dump()  # Получаем объект чата (chat) из сообщения
+    # и тоже превращаем его в полный словарь со всеми полями через .model_dump()
 
     # Перед отправкой нового сообщения пробуем убрать клавиатуру у предыдущего сообщения бота (если его ID есть в FSM).
     await remove_previous_bot_keyboard(
