@@ -27,8 +27,10 @@ from ..keyboards.registration import (
     build_bank_choice_keyboard,
     build_main_bank_choice_keyboard,
     build_no_bank_keyboard,
-    BANK_LABELS,
 )
+
+# Импортируем словарь банков (в т.ч. для названий в текстах сообщений)
+from ..tools.banks_wordbook import BANKS
 
 # Создаём роутер для регистрационных хэндлеров.
 # Router — объект, к которому мы "пришиваем" функции-обработчики событий.
@@ -49,9 +51,9 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     # Отправляем сообщение с текстом и обычной клавиатурой для запроса контакта.
     await message.answer(
-        text=REQUEST_PHONE_TEXT,                  # Текст сообщения берём из константы
+        text=REQUEST_PHONE_TEXT,                       # Текст сообщения берём из константы
         reply_markup=build_request_phone_keyboard(),  # Клавиатура с кнопкой "Отправить номер телефона"
-        parse_mode="Markdown"                    # Указываем Markdown, чтобы *жирный* и т.п. работали
+        parse_mode="Markdown"                         # Указываем Markdown, чтобы *жирный* и т.п. работали
     )
 
 
@@ -145,11 +147,10 @@ async def process_bank_choice(
             text=NO_BANK_TEXT,                   # текст, в котором объясняем, что делать, если нет нужного банка
             reply_markup=no_banks_keyboard       # новая клавиатура для этого сценария
         )
-        await state.set_state (
+        await state.set_state(
             RegistrationStates.no_banks
         )
         return                                   # после обработки "no_such" выходим из хэндлера
-
 
     # 2) Пользователь нажал «Далее ➡» — завершает выбор банков
     if action == "next":                         # проверяем, что после "bank:" пришло "next"
@@ -160,8 +161,10 @@ async def process_bank_choice(
             )
             return                               # не даём перейти дальше без хотя бы одного банка
 
-        readable_banks = [                       # формируем список читаемых названий банков
-            BANK_LABELS[code]                    # берём название банка по его коду из словаря BANK_LABELS
+        # Формируем список читаемых названий банков для текста:
+        # используем поле "message_title" из словаря BANKS
+        readable_banks = [
+            BANKS[code]["message_title"]         # читаем текстовое имя банка по его коду
             for code in selected_banks           # для всех кодов, которые пользователь выбрал
         ]
         banks_list_str = ", ".join(              # собираем список банков в одну строку через запятую
@@ -216,7 +219,6 @@ async def process_bank_choice(
     await callback.message.edit_reply_markup(    # редактируем ТОЛЬКО клавиатуру у текущего сообщения
         reply_markup=new_keyboard                # передаём новую инлайн-клавиатуру для экрана "Выбор банков"
     )
-
 
 
 @registration_router.callback_query(
@@ -281,9 +283,6 @@ async def process_main_bank_choice(callback: CallbackQuery, state: FSMContext) -
     # ---------- СЦЕНАРИЙ 2: КНОПКА «ДАЛЕЕ» ----------
 
     if action == "next":
-        # Если основной банк ещё не выбран (main_bank = None),
-        # показываем пользователю модальное окно с просьбой выбрать банк.
-
         # Здесь можно сохранить основной банк в БД (логика приложения).
         # Пример: await db.save_main_bank(user_id=callback.from_user.id, bank_code=main_bank)
 
@@ -294,13 +293,10 @@ async def process_main_bank_choice(callback: CallbackQuery, state: FSMContext) -
         await callback.answer()
         await callback.message.delete()
 
-        # ВАЖНО: вместо отправки НОВОГО сообщения
-        # мы РЕДАКТИРУЕМ ПОСЛЕДНЕЕ сообщение бота.
-        # edit_text позволяет одновременно изменить и текст, и клавиатуру.
+        # Отправляем финальное сообщение пользователю.
         await callback.message.answer(
-            text=final_text,   # Новый текст (финальное сообщение)
+            text=final_text,               # Новый текст (финальное сообщение)
             reply_markup=ReplyKeyboardRemove()  # Убираем клавиатуру (можно оставить другую, если нужно)
-            # parse_mode указывать не обязательно, если в Bot по умолчанию стоит Markdown.
         )
 
         # Очищаем состояние FSM — ветка регистрации завершена.
@@ -336,30 +332,31 @@ async def process_main_bank_choice(callback: CallbackQuery, state: FSMContext) -
     # Обновляем только клавиатуру у текущего сообщения (текст шага 3 не меняется).
     await callback.message.edit_reply_markup(reply_markup=new_keyboard)
 
+
 @registration_router.callback_query(             # регистрируем хэндлер на callback-запросы
-    RegistrationStates.no_banks,        # хэндлер срабатывает, когда пользователь в состоянии waiting_for_banks
-    F.data.startswith("no_bank:")                   # и когда callback_data начинается с "no_bank:"
+    RegistrationStates.no_banks,                 # хэндлер срабатывает, когда пользователь в состоянии no_banks
+    F.data.startswith("no_bank:")                # и когда callback_data начинается с "no_bank:"
 )
-async def no_bank (
+async def no_bank(
     callback: CallbackQuery,                     # объект callback-запроса от Telegram
     state: FSMContext                            # контекст машины состояний для конкретного пользователя
 ) -> None:
-    data = callback.data  # получаем строку callback_data, например: "bank:sber" или "bank:next"
+    data = callback.data                         # получаем строку callback_data, например: "no_bank:back" или "no_bank:start"
 
-    _, action = data.split(":", maxsplit=1)
+    _, action = data.split(":", maxsplit=1)      # отделяем префикс "no_bank" и получаем действие
 
     if action == "back":
         await state.set_state(RegistrationStates.waiting_for_banks)
 
-        fsm_data = await state.get_data()  # загружаем текущие данные FSM для этого пользователя
-        phone: str = fsm_data.get(  # достаём номер телефона из FSM
-            "phone",  # ключ, под которым хранится номер телефона
-            "неизвестен"  # значение по умолчанию, если почему-то телефона нет в состоянии
+        fsm_data = await state.get_data()        # загружаем текущие данные FSM для этого пользователя
+        phone: str = fsm_data.get(               # достаём номер телефона из FSM
+            "phone",                             # ключ, под которым хранится номер телефона
+            "неизвестен"                         # значение по умолчанию, если почему-то телефона нет в состоянии
         )
         # Формируем текст сообщения "Выбор банков": подставляем номер телефона в шаблон.
         text = BANK_CHOICE_TEXT_TEMPLATE.format(phone=phone)
 
-        # Отправляем сообщение с инлайн-клавиатурой выбора банков.
+        # Возвращаем пользователя на шаг выбора банков.
         await callback.message.edit_text(
             text=text,
             reply_markup=build_bank_choice_keyboard(selected_banks=[]),  # пока ни один банк не выбран
@@ -376,26 +373,22 @@ async def no_bank (
 
         # Отправляем сообщение с текстом и обычной клавиатурой для запроса контакта.
         await callback.message.answer(
-            text=REQUEST_PHONE_TEXT,  # Текст сообщения берём из константы
+            text=REQUEST_PHONE_TEXT,                  # Текст сообщения берём из константы
             reply_markup=build_request_phone_keyboard(),  # Клавиатура с кнопкой "Отправить номер телефона"
-            parse_mode="Markdown"  # Указываем Markdown, чтобы *жирный* и т.п. работали
+            parse_mode="Markdown"                    # Указываем Markdown, чтобы *жирный* и т.п. работали
         )
         return
 
-    await state.set_state(RegistrationStates.thanks_for_help_state)
 
 @registration_router.message(              # Хэндлер сообщений
-    RegistrationStates.thanks_for_help_state    # Сработает ТОЛЬКО в этом состоянии FSM
+    RegistrationStates.no_banks            # Сработает ТОЛЬКО в этом состоянии FSM
 )
 async def process_name(                    # Обработчик сообщения
     message: Message,                      # Сообщение от пользователя
     state: FSMContext                      # Контекст FSM для этого юзера
 ) -> None:
 
-    await state.set_state(RegistrationStates.no_banks)
-
     await message.answer(
         text=NO_BANK_THANKS_TEXT,
-        reply_markup= build_no_bank_keyboard()
+        reply_markup=build_no_bank_keyboard()
     )
-
