@@ -1,16 +1,12 @@
-# main.py
+import asyncio  # Импортируем модуль asyncio — нужен для запуска асинхронного цикла событий (event loop)
+import os       # Импортируем модуль os — из него будем брать переменную окружения с токеном бота
 
 import asyncio  # Модуль asyncio нужен для запуска асинхронного кода (event loop)
+from aiogram import Bot, Dispatcher  # Bot — клиент Telegram, Dispatcher — распределяет апдейты по хэндлерам
+from aiogram.fsm.storage.memory import MemoryStorage  # Памятное (in-memory) хранилище состояний FSM
+from aiogram.client.default import DefaultBotProperties  # Класс для задания свойств бота по умолчанию
 
-from aiogram import Bot, Dispatcher  # Bot — клиент Telegram, Dispatcher — маршрутизатор апдейтов
-from aiogram.fsm.storage.memory import MemoryStorage  # Хранилище состояний в памяти процесса
-from aiogram.client.default import DefaultBotProperties
-
-from .handlers.registration import registration_router  # Импортируем наш роутер с хэндлерами регистрации
-
-# Здесь, как правило, хранят токен бота.
-# В реальном проекте лучше брать его из переменных окружения.
-BOT_TOKEN = ""  # TODO: замените на реальный токен
+from .handlers.registration import registration_router  # Импортируем роутер с хэндлерами регистрации из пакета handlers
 
 
 async def main() -> None:
@@ -19,29 +15,51 @@ async def main() -> None:
     Здесь создаём бота, диспетчер, регистрируем роутеры и запускаем polling.
     """
 
-    # Создаём объект Bot.
-    # Аргумент token — строка с токеном, полученным у BotFather.
+    # Получаем токен бота из переменной окружения BOT_TOKEN.
+    # Никакой переменной BOT_TOKEN в коде больше нет — всё берётся только из окружения,
+    # которое ты укажешь в настройках конфигурации запуска PyCharm.
+    token = os.getenv("BOT_TOKEN")  # os.getenv возвращает строку с токеном или None, если переменная не задана
+
+    # Проверяем, что токен действительно найден в окружении.
+    # Если переменная не задана (token is None или пустая строка), выбрасываем исключение —
+    # чтобы сразу увидеть понятную ошибку при запуске, а не молча падать где-то внутри aiogram.
+    if not token:  # Условие сработает, если token == None, "" или любая "ложная" строка
+        raise RuntimeError(
+            "Переменная окружения BOT_TOKEN не задана. "
+            "Укажи её в настройках конфигурации запуска (Run/Debug) в PyCharm."
+        )
+
+    # Создаём объект Bot — это обёртка над Telegram Bot API, через него отправляются сообщения, читаются апдейты и т.д.
+    # Параметр token — строка с токеном твоего бота, полученная у BotFather и переданная через окружение.
+    # default=DefaultBotProperties(...) — задаём свойства по умолчанию:
+    #   parse_mode="Markdown" — все сообщения будут интерпретироваться Телеграмом как Markdown-разметка.
     bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode="Markdown"),
+        token=token,  # Используем токен, который взяли из переменной окружения BOT_TOKEN
+        default=DefaultBotProperties(parse_mode="Markdown"),  # Устанавливаем режим форматирования текста по умолчанию
     )
 
-    # Создаём хранилище состояний (FSM).
-    # MemoryStorage хранит всё в оперативной памяти процесса.
-    # Для продакшена обычно используют RedisStorage или БД.
+    # Создаём хранилище состояний (Finite State Machine).
+    # MemoryStorage — все данные FSM хранятся в оперативной памяти текущего процесса.
+    # Подходит для разработки и тестов; для продакшена обычно используют Redis/Bd-хранилище.
     storage = MemoryStorage()
 
-    # Создаём Dispatcher — объект, который получает апдейты и раздаёт их хэндлерам.
-    dp = Dispatcher(storage=storage)
+    # Создаём Dispatcher — центральный объект, который принимает апдейты от бота
+    # и передаёт их в соответствующие роутеры/хэндлеры в зависимости от фильтров.
+    dp = Dispatcher(storage=storage)  # Передаём наше хранилище для работы FSM
 
-    # Регистрируем наш роутер с регистрацией в диспетчере.
+    # Регистрируем роутер регистрации в диспетчере.
+    # Теперь все хэндлеры, объявленные внутри registration_router, будут активны.
     dp.include_router(registration_router)
 
-    # Запускаем режим long polling, чтобы бот начал получать апдейты от Telegram.
+    # Запускаем long-polling — бесконечный цикл, в котором бот опрашивает серверы Telegram
+    # на наличие новых апдейтов (сообщений, нажатий кнопок и т.д.).
+    # dp.start_polling сам будет вызывать зарегистрированные хэндлеры по мере прихода апдейтов.
     await dp.start_polling(bot)
 
 
+# Этот блок выполняется только если файл запущен напрямую,
+# а не импортирован как модуль из другого файла.
 if __name__ == "__main__":
-    # Стандартная "точка захода" в программу.
-    # asyncio.run запускает нашу main() как корутину в event loop.
+    # asyncio.run запускает нашу корутину main() в новом event loop’е
+    # и блокирует текущий поток до её завершения.
     asyncio.run(main())

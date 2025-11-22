@@ -391,7 +391,7 @@ async def process_name(                    # Обработчик сообщен
 ) -> None:
 
     await state.set_state(RegistrationStates.no_banks)
-    
+
     await message.answer(
         text=NO_BANK_THANKS_TEXT,
         reply_markup= build_no_bank_keyboard()
