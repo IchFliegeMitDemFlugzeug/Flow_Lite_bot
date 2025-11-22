@@ -1,7 +1,6 @@
 import asyncio  # Импортируем модуль asyncio — нужен для запуска асинхронного цикла событий (event loop)
 import os       # Импортируем модуль os — из него будем брать переменную окружения с токеном бота
 
-import asyncio  # Модуль asyncio нужен для запуска асинхронного кода (event loop)
 from aiogram import Bot, Dispatcher  # Bot — клиент Telegram, Dispatcher — распределяет апдейты по хэндлерам
 from aiogram.fsm.storage.memory import MemoryStorage  # Памятное (in-memory) хранилище состояний FSM
 from aiogram.client.default import DefaultBotProperties  # Класс для задания свойств бота по умолчанию
