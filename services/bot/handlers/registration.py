@@ -1,40 +1,73 @@
 # handlers/registration.py
 
-import asyncio
+import asyncio  # Импортируем asyncio, если в будущем понадобится работа с фоновыми задачами
 # Импортируем класс Router для регистрации хэндлеров.
-from aiogram import Router, F
+from aiogram import Router, F  # Router — для маршрутизации, F — для фильтров по полям апдейта
 # Импортируем типы апдейтов, с которыми будем работать: Message и CallbackQuery.
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove  # Типы сообщений, callback-запросов и удаления клавиатуры
 # Импортируем фильтр команды /start
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart  # Фильтр, отлавливающий команду /start
 # Импортируем контекст FSM для работы с данными состояний.
-from aiogram.fsm.context import FSMContext
+from aiogram.fsm.context import FSMContext  # FSMContext — для хранения данных по состояниям
 
 # Импортируем наши состояния регистрации.
-from ..states.registration import RegistrationStates
+from ..states.registration import RegistrationStates  # Набор состояний для процесса регистрации
 # Импортируем тексты сообщений.
 from ..texts.registration import (
-    REQUEST_PHONE_TEXT,
-    BANK_CHOICE_TEXT_TEMPLATE,
-    NO_BANK_TEXT,
-    MAIN_BANK_CHOICE_TEXT_TEMPLATE,
-    BANK_CHOICE_DONE_TEXT_TEMPLATE,
-    NO_BANK_THANKS_TEXT,
+    REQUEST_PHONE_TEXT,               # Текст запроса номера телефона
+    BANK_CHOICE_TEXT_TEMPLATE,        # Шаблон текста для шага «Выбор банков»
+    NO_BANK_TEXT,                     # Текст, если нет нужного банка
+    MAIN_BANK_CHOICE_TEXT_TEMPLATE,   # Шаблон текста для шага «Выбор основного банка»
+    BANK_CHOICE_DONE_TEXT_TEMPLATE,   # Текст после завершения выбора банков
+    NO_BANK_THANKS_TEXT,              # Текст благодарности за помощь, если пользователь ввёл банк вручную
 )
 # Импортируем клавиатуры.
 from ..keyboards.registration import (
-    build_request_phone_keyboard,
-    build_bank_choice_keyboard,
-    build_main_bank_choice_keyboard,
-    build_no_bank_keyboard,
+    build_request_phone_keyboard,     # Клавиатура для отправки номера телефона (reply-клавиатура)
+    build_bank_choice_keyboard,       # Инлайн-клавиатура для шага «Выбор банков»
+    build_main_bank_choice_keyboard,  # Инлайн-клавиатура для шага «Выбор основного банка»
+    build_no_bank_keyboard,           # Инлайн-клавиатура для сценария «нет нужного банка»
 )
 
 # Импортируем словарь банков (в т.ч. для названий в текстах сообщений)
-from ..tools.banks_wordbook import BANKS
+from ..tools.banks_wordbook import BANKS  # BANKS — словарь с данными по банкам (code, button_title, message_title, emoji)
+
+
+async def remove_previous_bot_keyboard(
+    state: FSMContext,    # Контекст FSM — из него достаём идентификатор предыдущего сообщения бота
+    bot,                  # Экземпляр бота (достаём из message.bot или callback.bot)
+    chat_id: int,         # Идентификатор чата, в котором нужно редактировать сообщение
+) -> None:
+    """
+    Убираем клавиатуру у предыдущего сообщения бота, если его ID сохранён в FSM.
+
+    Логика:
+    - достаём из FSM ключ "last_bot_message_id";
+    - если он есть — пытаемся вызвать edit_message_reply_markup с reply_markup=None;
+    - любое исключение (сообщение удалено, нет доступа и т.п.) игнорируем.
+    """
+    data = await state.get_data()                       # Получаем текущие данные FSM как словарь
+    last_id: int | None = data.get("last_bot_message_id")  # Пытаемся достать ID последнего сообщения бота
+
+    if not last_id:                                     # Если ID не найден (None или отсутствует)
+        return                                          # Нечего чистить — просто выходим
+
+    try:
+        # Пытаемся убрать клавиатуру у прошлого сообщения бота, передавая reply_markup=None
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id,                            # Чат, где лежит сообщение
+            message_id=last_id,                         # ID сообщения, у которого нужно убрать клавиатуру
+            reply_markup=None,                          # None — означает убрать любую инлайн/реплай-клавиатуру
+        )
+    except Exception:
+        # Если сообщение уже удалено или мы не можем его изменить — просто игнорируем ошибку
+        # (важно не ронять хэндлер из-за вспомогательной операции).
+        pass
+
 
 # Создаём роутер для регистрационных хэндлеров.
 # Router — объект, к которому мы "пришиваем" функции-обработчики событий.
-registration_router = Router(name="registration")  # name — просто удобная метка
+registration_router = Router(name="registration")  # name — просто удобная метка для отладки и структурирования
 
 
 @registration_router.message(CommandStart())  # Этот хэндлер срабатывает на команду /start
@@ -43,6 +76,20 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     Старт регистрации: показываем запрос номера телефона (Шаг 1 из 3).
     """
 
+    user = message.from_user  # Берём объект пользователя, который отправил команду /start
+    user_data = user.model_dump()  # Превращаем объект пользователя во **весь доступный словарь данных** (id, имя, username, язык и т.д.)
+
+    chat = message.chat  # Берём объект чата, в котором пришло сообщение
+    chat_data = chat.model_dump()  # Аналогично, вытаскиваем **всю доступную информацию о чате** в виде словаря
+
+    # Перед тем как отправлять новое сообщение,
+    # пробуем убрать клавиатуру у предыдущего сообщения бота (если оно есть).
+    await remove_previous_bot_keyboard(
+        state=state,                         # Передаём контекст FSM для доступа к last_bot_message_id
+        bot=message.bot,                     # Берём объект бота из message.bot
+        chat_id=message.chat.id,             # Берём ID текущего чата из message.chat.id
+    )
+
     # Сбрасываем любые предыдущие состояния и данные FSM.
     await state.clear()
 
@@ -50,11 +97,14 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.set_state(RegistrationStates.waiting_for_phone)
 
     # Отправляем сообщение с текстом и обычной клавиатурой для запроса контакта.
-    await message.answer(
+    sent_message = await message.answer(
         text=REQUEST_PHONE_TEXT,                       # Текст сообщения берём из константы
         reply_markup=build_request_phone_keyboard(),  # Клавиатура с кнопкой "Отправить номер телефона"
         parse_mode="Markdown"                         # Указываем Markdown, чтобы *жирный* и т.п. работали
     )
+
+    # Запоминаем ID этого сообщения как последнее сообщение бота (для последующей очистки клавиатуры).
+    await state.update_data(last_bot_message_id=sent_message.message_id)
 
 
 @registration_router.message(RegistrationStates.waiting_for_phone)
@@ -78,9 +128,22 @@ async def process_phone(message: Message, state: FSMContext) -> None:
 
     # Если номер не удалось определить — просим отправить ещё раз.
     if not phone:
-        await message.answer(
+        # Перед отправкой нового сообщения убираем клавиатуру у предыдущего сообщения бота (если оно было).
+        await remove_previous_bot_keyboard(
+            state=state,                     # FSM-контекст, где хранится last_bot_message_id
+            bot=message.bot,                 # Экземпляр бота
+            chat_id=message.chat.id,         # Текущий чат
+        )
+
+        # Отправляем пользователю уточняющее сообщение без клавиатуры
+        # (или можно добавить клавиатуру, если нужно).
+        sent_message = await message.answer(
             "Не удалось определить номер телефона. Пожалуйста, отправьте его ещё раз."
         )
+
+        # Запоминаем ID нового сообщения бота, чтобы при следующем ответе убрать у него клавиатуру.
+        await state.update_data(last_bot_message_id=sent_message.message_id)
+
         return  # Выходим из функции, состояние остаётся waiting_for_phone
 
     # Сохраняем номер телефона в данных FSM (state).
@@ -97,12 +160,22 @@ async def process_phone(message: Message, state: FSMContext) -> None:
     # Формируем текст сообщения "Выбор банков": подставляем номер телефона в шаблон.
     text = BANK_CHOICE_TEXT_TEMPLATE.format(phone=phone)
 
+    # Перед отправкой сообщения для шага 2 убираем клавиатуру у предыдущего сообщения бота.
+    await remove_previous_bot_keyboard(
+        state=state,                     # FSM-контекст
+        bot=message.bot,                 # Экземпляр бота
+        chat_id=message.chat.id,         # ID чата
+    )
+
     # Отправляем сообщение с инлайн-клавиатурой выбора банков.
-    await message.answer(
+    sent_message = await message.answer(
         text=text,
         reply_markup=build_bank_choice_keyboard(selected_banks=[]),  # пока ни один банк не выбран
         parse_mode="Markdown"
     )
+
+    # Запоминаем ID сообщения с инлайн-клавиатурой выбора банков.
+    await state.update_data(last_bot_message_id=sent_message.message_id)
 
 
 @registration_router.callback_query(             # регистрируем хэндлер на callback-запросы
@@ -148,7 +221,7 @@ async def process_bank_choice(
             reply_markup=no_banks_keyboard       # новая клавиатура для этого сценария
         )
         await state.set_state(
-            RegistrationStates.no_banks
+            RegistrationStates.no_banks          # Переводим пользователя в состояние no_banks
         )
         return                                   # после обработки "no_such" выходим из хэндлера
 
@@ -196,6 +269,9 @@ async def process_bank_choice(
             reply_markup=main_bank_keyboard      # новая инлайн-клавиатура выбора основного банка
         )
 
+        # Обновляем last_bot_message_id, так как мы продолжаем работать с тем же сообщением, но с новой клавиатурой.
+        await state.update_data(last_bot_message_id=callback.message.message_id)
+
         return                                   # после перехода на шаг выбора основного банка выходим из хэндлера
 
     # 3) Остаётся сценарий, когда action — это код банка (sber, tbank и т.п.)
@@ -219,6 +295,9 @@ async def process_bank_choice(
     await callback.message.edit_reply_markup(    # редактируем ТОЛЬКО клавиатуру у текущего сообщения
         reply_markup=new_keyboard                # передаём новую инлайн-клавиатуру для экрана "Выбор банков"
     )
+
+    # Так как мы всё ещё работаем с тем же сообщением, обновляем last_bot_message_id на его ID.
+    await state.update_data(last_bot_message_id=callback.message.message_id)
 
 
 @registration_router.callback_query(
@@ -277,6 +356,9 @@ async def process_main_bank_choice(callback: CallbackQuery, state: FSMContext) -
             reply_markup=keyboard
         )
 
+        # Обновляем last_bot_message_id — мы по-прежнему работаем с этим же сообщением.
+        await state.update_data(last_bot_message_id=callback.message.message_id)
+
         # Больше ничего делать не нужно — выходим из функции.
         return
 
@@ -291,13 +373,26 @@ async def process_main_bank_choice(callback: CallbackQuery, state: FSMContext) -
 
         # Закрываем "часики" на инлайн-кнопке.
         await callback.answer()
+
+        # Удаляем сообщение с инлайн-клавиатурой (чтобы не оставлять лишних кнопок в истории).
         await callback.message.delete()
 
-        # Отправляем финальное сообщение пользователю.
-        await callback.message.answer(
-            text=final_text,               # Новый текст (финальное сообщение)
-            reply_markup=ReplyKeyboardRemove()  # Убираем клавиатуру (можно оставить другую, если нужно)
+        # Перед отправкой нового финального сообщения
+        # пробуем убрать клавиатуру у последнего сохранённого сообщения бота (если оно ещё есть).
+        await remove_previous_bot_keyboard(
+            state=state,                     # FSM-контекст
+            bot=callback.message.bot,        # Экземпляр бота
+            chat_id=callback.message.chat.id # Текущий чат
         )
+
+        # Отправляем финальное сообщение пользователю.
+        sent_message = await callback.message.answer(
+            text=final_text,               # Новый текст (финальное сообщение)
+            reply_markup=ReplyKeyboardRemove()  # Убираем reply-клавиатуру (если она была)
+        )
+
+        # Запоминаем ID финального сообщения бота.
+        await state.update_data(last_bot_message_id=sent_message.message_id)
 
         # Очищаем состояние FSM — ветка регистрации завершена.
         await state.clear()
@@ -332,6 +427,9 @@ async def process_main_bank_choice(callback: CallbackQuery, state: FSMContext) -
     # Обновляем только клавиатуру у текущего сообщения (текст шага 3 не меняется).
     await callback.message.edit_reply_markup(reply_markup=new_keyboard)
 
+    # Обновляем last_bot_message_id — это всё то же сообщение шага 3.
+    await state.update_data(last_bot_message_id=callback.message.message_id)
+
 
 @registration_router.callback_query(             # регистрируем хэндлер на callback-запросы
     RegistrationStates.no_banks,                 # хэндлер срабатывает, когда пользователь в состоянии no_banks
@@ -356,27 +454,44 @@ async def no_bank(
         # Формируем текст сообщения "Выбор банков": подставляем номер телефона в шаблон.
         text = BANK_CHOICE_TEXT_TEMPLATE.format(phone=phone)
 
-        # Возвращаем пользователя на шаг выбора банков.
+        # Возвращаем пользователя на шаг выбора банков: редактируем текущее сообщение.
         await callback.message.edit_text(
             text=text,
             reply_markup=build_bank_choice_keyboard(selected_banks=[]),  # пока ни один банк не выбран
             parse_mode="Markdown"
         )
+
+        # Обновляем last_bot_message_id на ID текущего сообщения.
+        await state.update_data(last_bot_message_id=callback.message.message_id)
+
         return
 
     if action == "start":
+        # Удаляем текущее сообщение с клавиатурой "нет банка".
         await callback.message.delete()
         await state.clear()
+
+        # Перед отправкой нового стартового сообщения
+        # пробуем убрать клавиатуру у предыдущего сообщения бота (если оно сохранено).
+        await remove_previous_bot_keyboard(
+            state=state,                     # FSM-контекст
+            bot=callback.message.bot,        # Экземпляр бота
+            chat_id=callback.message.chat.id # Текущий чат
+        )
 
         # Устанавливаем новое состояние: ждём номер телефона.
         await state.set_state(RegistrationStates.waiting_for_phone)
 
         # Отправляем сообщение с текстом и обычной клавиатурой для запроса контакта.
-        await callback.message.answer(
+        sent_message = await callback.message.answer(
             text=REQUEST_PHONE_TEXT,                  # Текст сообщения берём из константы
             reply_markup=build_request_phone_keyboard(),  # Клавиатура с кнопкой "Отправить номер телефона"
             parse_mode="Markdown"                    # Указываем Markdown, чтобы *жирный* и т.п. работали
         )
+
+        # Запоминаем ID стартового сообщения, чтобы потом убрать у него клавиатуру.
+        await state.update_data(last_bot_message_id=sent_message.message_id)
+
         return
 
 
@@ -388,7 +503,19 @@ async def process_name(                    # Обработчик сообщен
     state: FSMContext                      # Контекст FSM для этого юзера
 ) -> None:
 
-    await message.answer(
+    # Перед отправкой благодарственного сообщения убираем клавиатуру
+    # у предыдущего сообщения бота (если оно сохранено).
+    await remove_previous_bot_keyboard(
+        state=state,                 # FSM-контекст
+        bot=message.bot,             # Экземпляр бота
+        chat_id=message.chat.id,     # Текущий чат
+    )
+
+    # Отправляем благодарность и новую клавиатуру (если она нужна в этом сценарии).
+    sent_message = await message.answer(
         text=NO_BANK_THANKS_TEXT,
         reply_markup=build_no_bank_keyboard()
     )
+
+    # Запоминаем ID этого сообщения как последнее сообщение бота.
+    await state.update_data(last_bot_message_id=sent_message.message_id)
