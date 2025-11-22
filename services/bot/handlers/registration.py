@@ -1,9 +1,10 @@
 # handlers/registration.py
 
+import asyncio
 # Импортируем класс Router для регистрации хэндлеров.
 from aiogram import Router, F
 # Импортируем типы апдейтов, с которыми будем работать: Message и CallbackQuery.
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 # Импортируем фильтр команды /start
 from aiogram.filters import CommandStart
 # Импортируем контекст FSM для работы с данными состояний.
@@ -291,13 +292,14 @@ async def process_main_bank_choice(callback: CallbackQuery, state: FSMContext) -
 
         # Закрываем "часики" на инлайн-кнопке.
         await callback.answer()
+        await callback.message.delete()
 
         # ВАЖНО: вместо отправки НОВОГО сообщения
         # мы РЕДАКТИРУЕМ ПОСЛЕДНЕЕ сообщение бота.
         # edit_text позволяет одновременно изменить и текст, и клавиатуру.
-        await callback.message.edit_text(
+        await callback.message.answer(
             text=final_text,   # Новый текст (финальное сообщение)
-            reply_markup=None  # Убираем клавиатуру (можно оставить другую, если нужно)
+            reply_markup=ReplyKeyboardRemove()  # Убираем клавиатуру (можно оставить другую, если нужно)
             # parse_mode указывать не обязательно, если в Bot по умолчанию стоит Markdown.
         )
 
