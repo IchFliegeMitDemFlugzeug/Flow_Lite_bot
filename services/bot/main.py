@@ -10,7 +10,7 @@ from .handlers.registration import registration_router  # Импортируем
 
 # Здесь, как правило, хранят токен бота.
 # В реальном проекте лучше брать его из переменных окружения.
-BOT_TOKEN = "8540412036:AAE5LPyfzrpf0RrNq6MneOAfNzjF1i4JiYI"  # TODO: замените на реальный токен
+BOT_TOKEN = ""  # TODO: замените на реальный токен
 
 
 async def main() -> None:
