@@ -6,7 +6,7 @@ from aiogram.fsm.storage.memory import MemoryStorage  # Памятное (in-mem
 from aiogram.client.default import DefaultBotProperties  # Класс для задания свойств бота по умолчанию
 
 from .handlers.registration import registration_router  # Импортируем роутер с хэндлерами регистрации из пакета handlers
-
+from .handlers.global_guard import global_guard_router # Наш глобальный роутер-фильтр
 
 async def main() -> None:
     """
@@ -49,6 +49,8 @@ async def main() -> None:
     # Регистрируем роутер регистрации в диспетчере.
     # Теперь все хэндлеры, объявленные внутри registration_router, будут активны.
     dp.include_router(registration_router)
+    dp.include_router(global_guard_router)  # И ТОЛЬКО ПОТОМ подключаем глобальный роутер-фильтр
+    # Важно: он должен быть последним, чтобы не перехватывать сообщения раньше нужных хэндлеров
 
     # Запускаем long-polling — бесконечный цикл, в котором бот опрашивает серверы Telegram
     # на наличие новых апдейтов (сообщений, нажатий кнопок и т.д.).
