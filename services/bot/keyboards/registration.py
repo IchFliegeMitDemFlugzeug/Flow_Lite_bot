@@ -11,6 +11,46 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder  # Удобный би�
 
 from ..tools.banks_wordbook import BANKS
 
+# --- 0. Стартовый экран (/start для НЕзарегистрированного пользователя) --- #
+
+def build_start_keyboard() -> InlineKeyboardMarkup:
+    """
+    Инлайн-клавиатура стартового экрана.
+
+    Кнопки:
+    - «Информация»         -> callback_data="start:info"
+    - «Обзор бота»         -> callback_data="start:overview"
+    - «Начать пользоваться»-> callback_data="start:begin"
+    """
+    # Создаём кнопку «Информация»
+    info_button = InlineKeyboardButton(
+        text="ℹ️ Информация",                  # Текст на кнопке
+        callback_data="start:info",            # Данные, которые придут в callback.data
+    )
+
+    # Кнопка «Обзор бота»
+    overview_button = InlineKeyboardButton(
+        text="📊 Обзор бота",                  # Текст на кнопке
+        callback_data="start:overview",        # Данные для callback.data
+    )
+
+    # Кнопка «Начать пользоваться»
+    begin_button = InlineKeyboardButton(
+        text="🚀 Начать пользоваться",         # Текст на кнопке
+        callback_data="start:begin",           # Данные для callback.data
+    )
+
+    # Формируем инлайн-клавиатуру с тремя рядами
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [info_button],                     # Первый ряд — одна кнопка
+            [overview_button],                 # Второй ряд — одна кнопка
+            [begin_button],                    # Третий ряд — одна кнопка
+        ]
+    )
+
+    return keyboard                            # Возвращаем готовую клавиатуру
+
 def build_request_phone_keyboard() -> ReplyKeyboardMarkup:
     """
     Клавиатура для запроса номера телефона (Шаг 1 из 3).

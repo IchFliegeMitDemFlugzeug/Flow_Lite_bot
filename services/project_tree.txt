@@ -1,0 +1,33 @@
+services
+├── bot
+│   ├── handlers
+│   │   ├── __init__.py
+│   │   ├── global_guard.py
+│   │   └── registration.py
+│   ├── headlines
+│   │   ├── __init__.py
+│   │   ├── add_headline.py
+│   │   ├── base_headline.jpg
+│   │   ├── reg_1.jpg
+│   │   ├── reg_2.jpg
+│   │   └── reg_3.jpg
+│   ├── keyboards
+│   │   ├── __init__.py
+│   │   └── registration.py
+│   ├── states
+│   │   ├── __init__.py
+│   │   └── registration.py
+│   ├── texts
+│   │   ├── __init__.py
+│   │   └── registration.py
+│   ├── tools
+│   │   ├── __init__.py
+│   │   ├── banks_wordbook.py
+│   │   ├── remove_keyboards.py
+│   │   └── safe_edit.py
+│   ├── Dockerfile
+│   ├── __init__.py
+│   ├── config.py
+│   └── main.py
+├── __init__.py
+└── export_tree.py

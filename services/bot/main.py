@@ -6,7 +6,7 @@ from aiogram.fsm.storage.memory import MemoryStorage  # Памятное (in-mem
 from aiogram.client.default import DefaultBotProperties  # Класс для задания свойств бота по умолчанию
 
 from .handlers.registration import registration_router  # Импортируем роутер с хэндлерами регистрации из пакета handlers
-from .handlers.global_guard import global_guard_router # Наш глобальный роутер-фильтр
+from bot.tools.global_guard import global_guard_router # Наш глобальный роутер-фильтр
 
 async def main() -> None:
     """

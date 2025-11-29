@@ -11,3 +11,6 @@ __pycache__/
 # Игнорируем служебную папку настроек PyCharm
 .idea/
 
+services/bot/database/users/
+
+
