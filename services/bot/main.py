@@ -5,8 +5,16 @@ from aiogram import Bot, Dispatcher  # Bot — клиент Telegram, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage  # Памятное (in-memory) хранилище состояний FSM
 from aiogram.client.default import DefaultBotProperties  # Класс для задания свойств бота по умолчанию
 
-from .handlers.registration import registration_router  # Импортируем роутер с хэндлерами регистрации из пакета handlers
-from bot.tools.global_guard import global_guard_router # Наш глобальный роутер-фильтр
+from .handlers.registration import (                    # Импортируем роутеры хэндлеров
+    registration_router,                                # Роутер регистрации
+)
+from .handlers.personal_cabinet import (                # Импортируем роутер личного кабинета
+    personal_cabinet_router,                            # Роутер экрана «Личный кабинет»
+)
+from bot.tools.global_guard import (                    # Импортируем глобальный роутер-фильтр
+    global_guard_router,                                # Роутер, который чистит "левые" сообщения
+)
+
 
 async def main() -> None:
     """
@@ -49,6 +57,7 @@ async def main() -> None:
     # Регистрируем роутер регистрации в диспетчере.
     # Теперь все хэндлеры, объявленные внутри registration_router, будут активны.
     dp.include_router(registration_router)
+    dp.include_router(personal_cabinet_router)  # Активируем хэндлеры экрана «Личный кабинет»
     dp.include_router(global_guard_router)  # И ТОЛЬКО ПОТОМ подключаем глобальный роутер-фильтр
     # Важно: он должен быть последним, чтобы не перехватывать сообщения раньше нужных хэндлеров
 

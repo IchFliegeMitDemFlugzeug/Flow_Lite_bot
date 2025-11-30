@@ -1,129 +1,126 @@
-# -*- coding: utf-8 -*-  # Указываем кодировку файла, чтобы корректно работать с кириллицей
+# services/bot/database/models.py
 
 """
-Простые модели данных для временной "базы данных" бота ПОТОК Lite.
+Модели данных для файловой "базы данных" бота.
 
-Здесь мы описываем структуру того, что храним в JSON-файлах:
-- данные по одному номеру телефона (PhoneData);
-- данные по пользователю (UserData).
+Задача:
+- описать структуру пользователя (User) и телефона (PhoneData);
+- уметь превращать их в словарь (для JSON) и обратно.
 """
 
-from dataclasses import dataclass, field   # Импортируем dataclass и field для удобного описания моделей
-from typing import Dict, List, Optional    # Импортируем типы для аннотаций (словарь, список, необязательное значение)
+from __future__ import annotations  # Разрешаем ссылаться на классы, объявленные ниже
+
+from dataclasses import dataclass, field  # dataclass — удобный способ описать "структуру" данных
+from typing import Dict, List, Optional   # Типы для аннотаций (словарь, список, Optional)
 
 
 @dataclass
 class PhoneData:
     """
-    Данные по ОДНОМУ номеру телефона пользователя.
-    Один номер телефона может быть привязан к нескольким банкам,
-    и у него может быть выбран основной банк.
+    Информация по одному номеру телефона пользователя.
     """
+    banks: List[str] = field(default_factory=list)          # Список кодов банков, привязанных к номеру
+    main_bank: Optional[str] = None                         # Код основного банка (или None)
 
-    phone: str                             # Сам номер телефона в виде строки (например, "+79991234567")
-    banks: List[str] = field(default_factory=list)         # Список кодов банков, в которых номер зарегистрирован
-    main_bank: Optional[str] = None        # Код основного банка для этого номера (или None, если не выбран)
-
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict:
         """
-        Преобразуем объект PhoneData в обычный словарь, который можно сохранить в JSON.
+        Преобразуем объект PhoneData в обычный словарь для сохранения в JSON.
         """
         return {
-            "phone": self.phone,           # Сохраняем сам номер телефона
-            "banks": list(self.banks),     # Сохраняем список банков (делаем копию на всякий случай)
-            "main_bank": self.main_bank,   # Сохраняем код основного банка или None
+            "banks": list(self.banks),                      # Явно приводим к list, чтобы не было сюрпризов
+            "main_bank": self.main_bank,                    # Просто сохраняем строку или None
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, object]) -> "PhoneData":
+    def from_dict(cls, data: dict | None) -> "PhoneData":
         """
-        Восстанавливаем объект PhoneData из словаря (который получили из JSON).
+        Восстанавливаем PhoneData из словаря (например, прочитанного из JSON).
+        Если данных нет или формат неожиданный — аккуратно возвращаем объект по умолчанию.
         """
+        if not isinstance(data, dict):                      # Если пришло не dict, считаем, что данных нет
+            return cls()                                    # Возвращаем объект с настройками по умолчанию
+
+        banks_raw = data.get("banks", [])                   # Берём список банков (если нет — пустой список)
+        if not isinstance(banks_raw, list):                 # Если в JSON лежит не список
+            banks: List[str] = []                           # То защищаемся и делаем пустой список
+        else:
+            # Приводим каждый элемент к строке (на всякий случай)
+            banks = [str(b) for b in banks_raw]
+
+        main_bank_raw = data.get("main_bank")               # Берём из словаря main_bank (если есть)
+        main_bank = str(main_bank_raw) if main_bank_raw is not None else None
+
         return cls(
-            phone=str(data.get("phone", "")),      # Берём поле "phone" из словаря, по умолчанию пустая строка
-            banks=list(data.get("banks", [])),     # Берём список "banks" или пустой список
-            main_bank=data.get("main_bank"),       # Берём основной банк как есть (может быть None)
+            banks=banks,                                    # Список кодов банков
+            main_bank=main_bank,                            # Код основного банка или None
         )
 
 
 @dataclass
-class UserData:
+class User:
     """
-    Данные по ОДНОМУ пользователю бота.
-    Для каждого пользователя создаётся отдельный JSON-файл, в котором хранится:
-
-    - user_id           — Telegram ID пользователя;
-    - first_name        — имя;
-    - last_name         — фамилия;
-    - username          — @username;
-    - phones            — словарь {номер_телефона: PhoneData};
-    - cards             — список номеров банковских карт (пока как простые строки);
-    - registration_step — на каком шаге регистрации сейчас пользователь;
-    - current_phone     — номер телефона, с которым прямо сейчас идёт регистрация.
+    Модель пользователя, который хранится в файловой "базе".
     """
+    id: int                                                 # Telegram user_id (обязательное поле)
 
-    user_id: int                                         # Уникальный Telegram ID пользователя
-    first_name: Optional[str] = None                     # Имя пользователя (может быть None)
-    last_name: Optional[str] = None                      # Фамилия пользователя (может быть None)
-    username: Optional[str] = None                       # username пользователя (может быть None)
+    first_name: Optional[str] = None                        # Имя (как в Telegram)
+    last_name: Optional[str] = None                         # Фамилия
+    username: Optional[str] = None                          # username (@nickname) или None
 
-    phones: Dict[str, PhoneData] = field(default_factory=dict)  # Словарь номеров телефонов: {"+7999...": PhoneData}
-    cards: List[str] = field(default_factory=list)       # Пока просто список строк с номерами карт
+    registration_step: Optional[str] = None                 # Текущий шаг регистрации (например, "phone", "banks", "completed")
+    current_phone: Optional[str] = None                     # "Текущий" номер телефона, с которым сейчас работаем
 
-    registration_step: Optional[str] = None              # "phone" / "banks" / "main_bank" / "no_banks" / "completed" или None
-    current_phone: Optional[str] = None                  # Номер телефона, с которым сейчас работает регистрация (или None)
+    phones: Dict[str, PhoneData] = field(default_factory=dict)
+    # Словарь "номер телефона" -> PhoneData
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict:
         """
-        Преобразуем объект UserData в словарь для сохранения в JSON.
+        Преобразуем User в словарь для сохранения в JSON.
         """
         return {
-            "user_id": self.user_id,                     # Сохраняем Telegram ID
-            "first_name": self.first_name,               # Сохраняем имя
-            "last_name": self.last_name,                 # Сохраняем фамилию
-            "username": self.username,                   # Сохраняем username
-            "phones": {                                  # Сериализуем словарь телефонов
-                phone: phone_data.to_dict()              # Каждый PhoneData превращаем в словарь
+            "id": int(self.id),                             # user_id явно приводим к int
+            "first_name": self.first_name,                  # Имя как есть
+            "last_name": self.last_name,                    # Фамилия
+            "username": self.username,                      # username
+            "registration_step": self.registration_step,    # Строка шага регистрации или None
+            "current_phone": self.current_phone,            # Текущий номер телефона или None
+            "phones": {
+                phone: phone_data.to_dict()                 # Каждый PhoneData превращаем в словарь
                 for phone, phone_data in self.phones.items()
             },
-            "cards": list(self.cards),                   # Сохраняем список карт (делаем копию)
-            "registration_step": self.registration_step, # Сохраняем текущий шаг регистрации
-            "current_phone": self.current_phone,         # Сохраняем текущий номер телефона
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, object]) -> "UserData":
+    def from_dict(cls, data: dict | None) -> "User":
         """
-        Восстанавливаем объект UserData из словаря (который получили из JSON-файла).
+        Создаём User из словаря, прочитанного из JSON.
+        Если формат неожиданной — по максимуму восстанавливаем адекватные значения.
         """
-        # Создаём пользователя с базовыми полями
-        user = cls(
-            user_id=int(data.get("user_id", 0)),         # Восстанавливаем user_id (по умолчанию 0)
-            first_name=data.get("first_name"),           # Имя
-            last_name=data.get("last_name"),             # Фамилия
-            username=data.get("username"),               # username
+        if not isinstance(data, dict):                      # Если почему-то пришло не dict — создаём "пустого" юзера
+            raise ValueError("User.from_dict ожидает dict с полями пользователя")
+
+        user_id_raw = data.get("id")                        # Берём поле id из словаря
+        if user_id_raw is None:                             # Если его нет — это критическая ошибка
+            raise ValueError("В JSON пользователя отсутствует поле 'id'")
+
+        user_id = int(user_id_raw)                          # Принудительно приводим к int
+
+        phones_raw = data.get("phones", {})                 # Берём словарь телефонов (или пустой)
+        if not isinstance(phones_raw, dict):                # Если там не dict — защищаемся
+            phones_raw = {}
+
+        phones: Dict[str, PhoneData] = {}                   # Сюда будем складывать восстановленные PhoneData
+
+        for phone, phone_dict in phones_raw.items():        # Перебираем номера телефона и их данные
+            phone_str = str(phone)                          # Ключ (номер) приводим к строке
+            phones[phone_str] = PhoneData.from_dict(phone_dict)  # Восстанавливаем PhoneData из словаря
+
+        return cls(
+            id=user_id,                                     # user_id
+            first_name=data.get("first_name"),              # Имя (может быть None)
+            last_name=data.get("last_name"),                # Фамилия (может быть None)
+            username=data.get("username"),                  # username (может быть None)
+            registration_step=data.get("registration_step"),# Шаг регистрации (строка или None)
+            current_phone=data.get("current_phone"),        # Текущий номер телефона (или None)
+            phones=phones,                                  # Восстановленный словарь телефонов
         )
-
-        # Восстанавливаем словарь телефонов, если он есть в данных
-        phones_raw = data.get("phones", {}) or {}        # Берём поле "phones" или пустой словарь
-        if isinstance(phones_raw, dict):                 # Убеждаемся, что это словарь
-            for phone, phone_data_dict in phones_raw.items():  # Перебираем все записи
-                try:
-                    phone_obj = PhoneData.from_dict(phone_data_dict or {})  # Восстанавливаем PhoneData
-                except Exception:
-                    # Если по какой-то причине не удалось разобрать запись по телефону — пропускаем её
-                    continue
-                user.phones[phone] = phone_obj           # Кладём объект PhoneData в словарь пользователя
-
-        # Восстанавливаем список карт (если есть)
-        cards_raw = data.get("cards", []) or []          # Берём "cards" или пустой список
-        if isinstance(cards_raw, list):                  # Если это список
-            user.cards = [str(card) for card in cards_raw]  # Сохраняем каждый элемент как строку
-
-        # Восстанавливаем шаг регистрации (если был сохранён)
-        user.registration_step = data.get("registration_step")  # Просто читаем значение или None
-
-        # Восстанавливаем текущий номер телефона (если был сохранён)
-        user.current_phone = data.get("current_phone")  # Тоже читаем значение или None
-
-        return user                                     # Возвращаем полностью заполненный объект UserData

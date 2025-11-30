@@ -1,100 +1,133 @@
-from pathlib import Path  # Импортируем Path для удобной и кроссплатформенной работы с путями к файлам
+from __future__ import annotations                       # Разрешаем "отложенные" аннотации типов (удобно для type hints)
 
-from aiogram.types import (  # Импортируем необходимые типы из aiogram
-    Message,                 # Тип сообщения Telegram, чтобы типизировать аргументы функций
-    FSInputFile,             # Тип для передачи файла с диска (локальная картинка)
-    InputMediaPhoto,         # Тип для редактирования media-содержимого сообщения (фото + подпись)
+from pathlib import Path                                 # Импортируем Path для удобной и кроссплатформенной работы с путями
+
+from aiogram.types import (                             # Импортируем нужные Telegram-типы из aiogram
+    Message,                                            # Тип объекта сообщения Telegram
+    FSInputFile,                                        # Тип для локального файла (картинка на диске)
+    InputMediaPhoto,                                    # Тип media-объекта для редактирования фото + подписи
 )
 
-
-# --- Константы типов заголовков (чтобы в хэндлерах не работать с "голыми" строками) --- #
-
-HEADLINE_REG_1 = "reg_1"     # Картинка-заголовок для шага регистрации №1 (запрос телефона)
-HEADLINE_REG_2 = "reg_2"     # Картинка-заголовок для шага регистрации №2 (выбор банков)
-HEADLINE_REG_3 = "reg_3"     # Картинка-заголовок для шага регистрации №3 (выбор основного банка)
-HEADLINE_BASE = "base"       # Базовая картинка-заголовок для всех остальных сообщений
+from ..database import set_last_bot_message_id          # Функция из нашей "БД": сохраняет ID последнего сообщения бота
 
 
-# --- Подготовка путей к файлам картинок --- #
+# --- Константы типов заголовков --- #
 
-HEADLINES_DIR: Path = Path(__file__).resolve().parent  # Определяем директорию, где лежит этот файл и картинки
+HEADLINE_REG_1: str = "reg_1"                          # Тип заголовка для шага регистрации №1 (ввод телефона)
+HEADLINE_REG_2: str = "reg_2"                          # Тип заголовка для шага регистрации №2 (выбор банков)
+HEADLINE_REG_3: str = "reg_3"                          # Тип заголовка для шага регистрации №3 (выбор основного банка)
+HEADLINE_BASE: str = "base"                            # Базовый тип заголовка для остальных экранов (личный кабинет и т.п.)
 
-HEADLINES_FILES: dict[str, Path] = {                   # Словарь: "тип заголовка" -> путь к файлу
-    HEADLINE_REG_1: HEADLINES_DIR / "reg_1.jpg",       # Путь к файлу reg_1.jpg
-    HEADLINE_REG_2: HEADLINES_DIR / "reg_2.jpg",       # Путь к файлу reg_2.jpg
-    HEADLINE_REG_3: HEADLINES_DIR / "reg_3.jpg",       # Путь к файлу reg_3.jpg
-    HEADLINE_BASE: HEADLINES_DIR / "base_headline.jpg" # Путь к файлу base_headline.jpg
+
+# --- Пути к файлам картинок --- #
+
+# Папка, в которой лежит этот файл add_headline.py.
+# В ней же лежат наши картинки: base_headline.jpg, reg_1.jpg, reg_2.jpg, reg_3.jpg.
+HEADLINES_DIR: Path = Path(__file__).resolve().parent   # Например: .../services/bot/headlines
+
+# Карта "тип заголовка" -> Path к нужному jpg-файлу.
+# Имена файлов взяты из дерева проекта: base_headline.jpg, reg_1.jpg, reg_2.jpg, reg_3.jpg.
+HEADLINE_FILES: dict[str, Path] = {
+    HEADLINE_REG_1: HEADLINES_DIR / "reg_1.jpg",        # Картинка для шага регистрации №1
+    HEADLINE_REG_2: HEADLINES_DIR / "reg_2.jpg",        # Картинка для шага регистрации №2
+    HEADLINE_REG_3: HEADLINES_DIR / "reg_3.jpg",        # Картинка для шага регистрации №3
+    HEADLINE_BASE: HEADLINES_DIR / "base_headline.jpg", # Базовая картинка для других экранов
 }
 
 
 def _get_fs_input_file(headline_type: str) -> FSInputFile:
     """
-    Внутренняя вспомогательная функция:
-    по строковому типу заголовка возвращает объект FSInputFile с нужной картинкой.
+    Вспомогательная функция: по типу заголовка вернуть FSInputFile с нужной картинкой.
 
-    :param headline_type: Один из ключей:
-                          "reg_1", "reg_2", "reg_3", "base".
-    :return: FSInputFile с путём к соответствующему JPG-файлу.
+    Если тип неизвестен (опечатка или новое значение), используем базовую картинку HEADLINE_BASE.
     """
-    path: Path = HEADLINES_FILES.get(                  # Получаем путь к файлу по ключу
-        headline_type,                                 # Ключ заголовка, который запросили
-        HEADLINES_FILES[HEADLINE_BASE],                # Если не нашли — берём базовый заголовок
-    )
-    return FSInputFile(path)                           # Оборачиваем путь в FSInputFile (aiogram сам откроет файл при отправке)
+
+    # Берём из словаря путь к файлу по ключу headline_type.
+    # Если такой ключ не найден — подставляем путь для HEADLINE_BASE.
+    path: Path = HEADLINE_FILES.get(headline_type, HEADLINE_FILES[HEADLINE_BASE])
+
+    # Оборачиваем путь в FSInputFile — это специальный тип aiogram для отправки локальных файлов
+    return FSInputFile(path)
 
 
 async def send_message_with_headline(
-    message: Message,                                  # Сообщение, от которого делаем "ответ" (answer)
-    text: str,                                         # Текст, который пойдёт в caption под картинкой
-    headline_type: str,                                # Тип заголовка: "reg_1" / "reg_2" / "reg_3" / "base"
-    reply_markup=None,                                 # Любая клавиатура (reply или inline), если нужна
-    parse_mode: str | None = "Markdown",                     # Режим парсинга текста: "Markdown", "HTML" или None
-):
+    message: Message,                                      # Исходное сообщение пользователя (на него "отвечаем")
+    text: str,                                             # Текст caption (подпись под картинкой)
+    headline_type: str = HEADLINE_BASE,                    # Тип заголовка (по умолчанию базовый)
+    reply_markup=None,                                     # Инлайн-клавиатура (или None)
+    parse_mode: str = "Markdown",                          # Режим разметки: используем Markdown (как в main.py)
+) -> Message:
     """
-    Отправляет НОВОЕ сообщение с картинкой-заголовком (photo + caption).
+    Отправить НОВОЕ сообщение с картинкой-заголовком и подписью.
 
-    Возвращает объект отправленного сообщения, чтобы его ID можно было
-    сохранить в FSM как last_bot_message_id.
+    Возвращает объект Message отправленного сообщения.
     """
-    photo: FSInputFile = _get_fs_input_file(headline_type)  # Получаем нужную картинку по типу заголовка
 
-    sent_message: Message = await message.answer_photo(     # Отправляем фото как "ответ" на текущее сообщение
-        photo=photo,                                        # Картинка-заголовок
-        caption=text,                                       # Текст под картинкой (caption)
-        reply_markup=reply_markup,                          # Клавиатура, если есть
-        parse_mode=parse_mode,                              # Режим парсинга разметки
+    # Получаем объект FSInputFile с нужной картинкой по типу заголовка
+    photo: FSInputFile = _get_fs_input_file(headline_type)
+
+    # Отправляем фото как "ответ" на исходное сообщение пользователя
+    sent_message: Message = await message.answer_photo(
+        photo=photo,                                       # Файл-картинка
+        caption=text,                                      # Подпись под картинкой
+        reply_markup=reply_markup,                         # Инлайн-клавиатура, если есть
+        parse_mode=parse_mode,                             # Режим разбора разметки (Markdown)
     )
 
-    return sent_message                                     # Возвращаем отправленное сообщение наружу
+    # После успешной отправки сохраняем ID этого сообщения как "последнее сообщение бота" для данного чата.
+    # Это нужно, чтобы позже можно было удалить у него клавиатуру, даже после перезапуска бота.
+    if message.chat:                                       # Проверяем, что у исходного message есть chat (должен быть всегда)
+        set_last_bot_message_id(
+            chat_id=message.chat.id,                       # ID чата
+            message_id=sent_message.message_id,            # ID только что отправленного сообщения бота
+        )
+
+    # Возвращаем отправленное сообщение наружу (чтобы хэндлер мог сохранить его ID в FSM и т.п.)
+    return sent_message
 
 
 async def edit_message_with_headline(
-    message: Message,                                       # Существующее сообщение, которое нужно отредактировать
-    text: str,                                              # Новый текст (caption) под картинкой
-    headline_type: str,                                     # Новый тип заголовка: "reg_1" / "reg_2" / "reg_3" / "base"
-    reply_markup=None,                                      # Новая клавиатура, если нужно её заменить
-    parse_mode: str | None = None,                          # Режим парсинга текста: "Markdown", "HTML" или None
-):
+    message: Message,                                      # Существующее сообщение бота, которое нужно отредактировать
+    text: str,                                             # Новый текст caption под картинкой
+    headline_type: str = HEADLINE_BASE,                    # Тип заголовка (можно сменить картинку при редактировании)
+    reply_markup=None,                                     # Новая клавиатура (или None)
+    parse_mode: str = "Markdown",                          # Режим разметки (Markdown)
+) -> Message:
     """
-    Редактирует УЖЕ ОТПРАВЛЕННОЕ сообщение с фото:
-    одновременно меняет картинку (media) и подпись (caption), а также клавиатуру.
+    Отредактировать УЖЕ СУЩЕСТВУЮЩЕЕ сообщение бота с картинкой-заголовком.
 
-    Используется, когда нужно, например:
-    - с шага выбора банков (reg_2) перейти на шаг выбора главного банка (reg_3);
-    - или из сценария "нет банка" вернуть пользователя на шаг выбора банков и т.п.
+    Меняем:
+    - картинку (если headline_type поменялся),
+    - текст caption,
+    - инлайн-клавиатуру.
     """
 
-    photo: FSInputFile = _get_fs_input_file(headline_type)  # Получаем нужную картинку по типу заголовка
+    # Получаем нужную картинку по типу заголовка
+    photo: FSInputFile = _get_fs_input_file(headline_type)
 
-    media: InputMediaPhoto = InputMediaPhoto(               # Формируем новый объект media для редактирования сообщения
-        media=photo,                                        # Указываем сам файл с картинкой
-        caption=text,                                       # Новый текст под картинкой
-        parse_mode=parse_mode,                              # Режим парсинга разметки для caption
+    # Формируем объект InputMediaPhoto для edit_media:
+    # в нём задаём и сам файл, и новый caption, и режим разметки.
+    media: InputMediaPhoto = InputMediaPhoto(
+        media=photo,                                       # Сам файл-картинка
+        caption=text,                                      # Новый текст под картинкой
+        parse_mode=parse_mode,                             # Режим разбора разметки (Markdown)
     )
 
-    edited_message: Message = await message.edit_media(     # Вызываем edit_media у самого сообщения
-        media=media,                                        # Передаём новый media-объект (фото + caption)
-        reply_markup=reply_markup,                          # При необходимости меняем клавиатуру
+    # Вызываем edit_media на исходном сообщении бота:
+    # - меняем media (картинку + caption)
+    # - при необходимости меняем клавиатуру (reply_markup)
+    edited_message: Message = await message.edit_media(
+        media=media,                                       # Новый media-объект
+        reply_markup=reply_markup,                         # Новая клавиатура (или None)
     )
 
-    return edited_message                                   # Возвращаем отредактированное сообщение наружу
+    # Обновляем запись о "последнем сообщении бота" для данного чата.
+    # ID сообщения, по сути, тот же, но полезно синхронизировать.
+    if message.chat:
+        set_last_bot_message_id(
+            chat_id=message.chat.id,                      # ID чата
+            message_id=edited_message.message_id,         # ID (тот же, но фиксируем как актуальный)
+        )
+
+    # Возвращаем отредактированное сообщение наружу
+    return edited_message

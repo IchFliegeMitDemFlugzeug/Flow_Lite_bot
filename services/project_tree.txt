@@ -1,8 +1,13 @@
 services
 ├── bot
+│   ├── database
+│   │   ├── users
+│   │   │   └── 1622929490.json
+│   │   ├── __init__.py
+│   │   ├── models.py
+│   │   └── storage.py
 │   ├── handlers
 │   │   ├── __init__.py
-│   │   ├── global_guard.py
 │   │   └── registration.py
 │   ├── headlines
 │   │   ├── __init__.py
@@ -23,6 +28,9 @@ services
 │   ├── tools
 │   │   ├── __init__.py
 │   │   ├── banks_wordbook.py
+│   │   ├── global_guard.py
+│   │   ├── info_links.py
+│   │   ├── phone_utils.py
 │   │   ├── remove_keyboards.py
 │   │   └── safe_edit.py
 │   ├── Dockerfile

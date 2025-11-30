@@ -1,197 +1,126 @@
-# -*- coding: utf-8 -*-  # Указываем кодировку файла
+# services/bot/database/storage.py
 
 """
-Простейшее файловое "хранилище" для данных пользователей.
+Низкоуровневые функции работы с файловой "базой данных".
 
-Важные моменты:
-- Для КАЖДОГО пользователя создаётся ОТДЕЛЬНЫЙ JSON-файл.
-- Все файлы лежат в папке "users" рядом с этим модулем.
-- Функции из этого модуля не являются асинхронными, но их можно спокойно
-  вызывать из async-кода (aiogram) — операции небольшие и быстрые.
+Здесь:
+- сохраняем и читаем пользователей в / из JSON-файлов;
+- отдельно храним last_bot_message_id по chat_id в файле last_messages.json.
 """
 
-import json                                         # Модуль json — для чтения/записи JSON-файлов
-from pathlib import Path                            # Path — удобная работа с путями
-from typing import Optional                         # Optional — для аннотаций типов
+from __future__ import annotations  # Разрешаем аннотации на будущие версии Python
 
-from .models import UserData, PhoneData             # Импортируем наши модели UserData и PhoneData
+import json                         # JSON — формат хранения данных на диске
+from pathlib import Path            # Path — удобная работа с путями
+from typing import Dict, Optional   # Типы для аннотаций
 
-
-# Базовая папка, где лежит этот модуль (services/bot/database)
-BASE_DIR: Path = Path(__file__).resolve().parent    # Определяем путь к текущей папке
-
-# Папка, в которой будут храниться ВСЕ JSON-файлы пользователей
-USERS_DIR: Path = BASE_DIR / "users"                # Путь вида ".../database/users"
-
-# Создаём папку USERS_DIR, если она ещё не существует
-USERS_DIR.mkdir(parents=True, exist_ok=True)        # parents=True — создаст все недостающие папки, exist_ok=True — не ругаться, если уже есть
+from .models import User            # Импортируем модель User для работы с пользователями
 
 
-def _get_user_file_path(user_id: int) -> Path:
+# Определяем базовую папку для модуля database (папка, где лежит этот файл)
+BASE_DIR: Path = Path(__file__).resolve().parent
+
+# Папка, где будем хранить пользователей (по одному JSON-файлу на пользователя)
+USERS_DIR: Path = BASE_DIR / "users"
+
+# Файл, в котором будем хранить ID последнего сообщения бота по каждому chat_id
+LAST_MESSAGES_FILE: Path = BASE_DIR / "last_messages.json"
+
+# Гарантируем, что папка для пользователей существует
+USERS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_json(path: Path) -> dict:
     """
-    Вспомогательная функция: возвращает путь к JSON-файлу конкретного пользователя.
+    Вспомогательная функция: аккуратно прочитать JSON-файл и вернуть dict.
 
-    Пример: для user_id=123 файл будет называться "123.json" и лежать в папке USERS_DIR.
+    Если файла нет или JSON битый — возвращаем пустой словарь.
     """
-    return USERS_DIR / f"{user_id}.json"            # Склеиваем путь к файлу "users/<user_id>.json"
+    if not path.exists():                                   # Если файл не существует
+        return {}                                           # Возвращаем пустой dict
+
+    try:
+        with path.open("r", encoding="utf-8") as f:         # Открываем файл на чтение в кодировке UTF-8
+            return json.load(f)                             # Пытаемся распарсить JSON и вернуть dict
+    except Exception:
+        # При любой ошибке чтения/парсинга возвращаем пустой dict,
+        # чтобы не ломать работу бота из-за повреждённого файла.
+        return {}
 
 
-def load_user(user_id: int) -> Optional[UserData]:
+def _save_json(path: Path, data: dict) -> None:
     """
-    Загружаем данные пользователя из JSON-файла.
-
-    Если файл не существует — возвращаем None.
+    Вспомогательная функция: безопасно сохранить dict в JSON-файл.
     """
-    file_path = _get_user_file_path(user_id)        # Строим путь к файлу пользователя
-
-    if not file_path.exists():                      # Если файл не найден
-        return None                                 # Возвращаем None (пользователь ещё не сохранялся)
-
-    with file_path.open("r", encoding="utf-8") as f:  # Открываем файл на чтение в кодировке UTF-8
-        raw_data = json.load(f)                     # Загружаем словарь из JSON
-
-    return UserData.from_dict(raw_data)             # Превращаем словарь в объект UserData и возвращаем его
+    with path.open("w", encoding="utf-8") as f:             # Открываем файл на запись
+        json.dump(data, f, ensure_ascii=False, indent=2)    # Сохраняем JSON с отступами и кириллицей
 
 
-def save_user(user: UserData) -> None:
+def load_user(user_id: int) -> Optional[User]:
     """
-    Сохраняем данные пользователя в его JSON-файл.
+    Прочитать пользователя из JSON-файла.
 
-    Если файла не было — он будет создан.
+    Возвращаем:
+    - объект User, если файл существует и корректен;
+    - None, если файла нет или он битый.
     """
-    file_path = _get_user_file_path(user.user_id)   # Определяем путь к файлу конкретного пользователя
+    path: Path = USERS_DIR / f"{int(user_id)}.json"         # Формируем путь вида users/123456789.json
 
-    USERS_DIR.mkdir(parents=True, exist_ok=True)    # Ещё раз убеждаемся, что папка существует (на всякий случай)
+    if not path.exists():                                   # Если файла нет — пользователя нет
+        return None
 
-    with file_path.open("w", encoding="utf-8") as f:  # Открываем файл на запись в UTF-8
-        json.dump(                                  # Сохраняем данные в JSON
-            user.to_dict(),                         # Преобразуем объект UserData в словарь
-            f,                                      # Файловый объект
-            ensure_ascii=False,                     # Не экранируем кириллицу
-            indent=2,                               # Красивые отступы в JSON (удобно читать руками)
-        )
+    raw_data: dict = _load_json(path)                       # Читаем JSON как dict
+
+    if not raw_data:                                        # Если словарь пустой (ошибка или файл пустой)
+        return None                                         # Считаем, что пользователя нет/файл некорректен
+
+    try:
+        user = User.from_dict(raw_data)                     # Пытаемся восстановить User из dict
+    except Exception:
+        # Если формат неожиданно битый, лучше вернуть None,
+        # чтобы не ломать остальной код.
+        return None
+
+    return user                                             # Возвращаем восстановленного пользователя
 
 
-def get_user(user_id: int) -> UserData:
+def save_user(user: User) -> None:
     """
-    Универсальная функция получения пользователя.
-
-    Если файл существует — возвращаем данные из него.
-    Если файла нет — создаём нового пользователя с данным user_id и сразу сохраняем его.
+    Сохранить объект User в JSON-файл.
     """
-    user = load_user(user_id)                       # Пытаемся загрузить пользователя из файла
-    if user is None:                                # Если пользователя ещё не было
-        user = UserData(user_id=user_id)            # Создаём новый объект UserData
-        save_user(user)                             # Сразу же сохраняем его в файл
-    return user                                     # Возвращаем объект UserData
+    path: Path = USERS_DIR / f"{int(user.id)}.json"         # Путь до файла конкретного пользователя
+    data: dict = user.to_dict()                            # Превращаем User в dict
+    _save_json(path, data)                                  # Сохраняем dict в JSON
 
 
-def update_basic_user_info(
-    user_id: int,
-    first_name: Optional[str],
-    last_name: Optional[str],
-    username: Optional[str],
-) -> UserData:
+def load_last_messages() -> Dict[str, int]:
     """
-    Обновляем базовую информацию о пользователе (имя, фамилия, username).
+    Прочитать карту {chat_id: last_bot_message_id} из JSON.
 
-    Возвращаем актуальный объект UserData.
+    Ключи храним как строки (так проще и надёжнее для JSON).
     """
-    user = get_user(user_id)                        # Получаем (или создаём) пользователя
-    user.first_name = first_name                    # Обновляем имя
-    user.last_name = last_name                      # Обновляем фамилию
-    user.username = username                        # Обновляем username
-    save_user(user)                                 # Сохраняем изменения в файл
-    return user                                     # Возвращаем обновлённый объект
+    raw_data: dict = _load_json(LAST_MESSAGES_FILE)         # Читаем словарь из файла
+
+    if not isinstance(raw_data, dict):                      # Если там лежит не dict
+        return {}                                           # Возвращаем пустую карту
+
+    result: Dict[str, int] = {}                             # Готовим результат
+
+    for chat_id_str, message_id in raw_data.items():        # Перебираем пары ключ-значение
+        try:
+            chat_id_key = str(chat_id_str)                  # Ключ всегда превращаем в строку
+            message_id_int = int(message_id)                # Значение пытаемся привести к int
+        except Exception:
+            continue                                        # Если не получилось — просто пропускаем такую запись
+
+        result[chat_id_key] = message_id_int                # Сохраняем корректную пару в результат
+
+    return result                                           # Возвращаем карту корректных значений
 
 
-def add_or_update_phone(
-    user_id: int,
-    phone: str,
-    banks: list[str],
-    main_bank: Optional[str],
-) -> UserData:
+def save_last_messages(mapping: Dict[str, int]) -> None:
     """
-    Добавляем новый номер телефона пользователю или обновляем существующий.
-
-    - phone      — номер телефона (строка, например "+79991234567");
-    - banks      — список кодов банков для этого номера;
-    - main_bank  — код основного банка или None.
+    Сохранить карту {chat_id: last_bot_message_id} в JSON-файл.
     """
-    user = get_user(user_id)                        # Получаем пользователя
-
-    existing_phone = user.phones.get(phone)         # Пытаемся найти существующую запись по этому номеру
-    if existing_phone is None:                      # Если записи ещё нет
-        existing_phone = PhoneData(phone=phone)     # Создаём новый объект PhoneData
-
-    # Обновляем поля объекта PhoneData
-    existing_phone.phone = phone                    # На всякий случай перезаписываем номер
-    # Удаляем дубликаты банков, сохраняя порядок (через dict.fromkeys)
-    existing_phone.banks = list(dict.fromkeys(banks))
-    existing_phone.main_bank = main_bank            # Обновляем основной банк (может быть None)
-
-    # Кладём обновлённый объект в словарь телефонов пользователя
-    user.phones[phone] = existing_phone
-
-    save_user(user)                                 # Сохраняем пользователя в файл
-    return user                                     # Возвращаем объект UserData
-
-
-def add_card(user_id: int, card_number: str) -> UserData:
-    """
-    Добавляем номер банковской карты пользователю.
-
-    Сейчас храним карты просто как список строк.
-    """
-    user = get_user(user_id)                        # Получаем пользователя
-    if card_number not in user.cards:               # Если этой карты ещё нет в списке
-        user.cards.append(card_number)              # Добавляем её
-        save_user(user)                             # Сохраняем изменения
-    return user                                     # Возвращаем пользователя
-
-
-def remove_card(user_id: int, card_number: str) -> UserData:
-    """
-    Удаляем номер банковской карты из списка пользователя (если он там есть).
-    """
-    user = get_user(user_id)                        # Получаем пользователя
-    if card_number in user.cards:                   # Если карта присутствует в списке
-        user.cards.remove(card_number)              # Удаляем её
-        save_user(user)                             # Сохраняем изменения
-    return user                                     # Возвращаем пользователя
-
-
-def set_registration_progress(
-    user_id: int,
-    step: Optional[str],
-    current_phone: Optional[str] = None,
-) -> UserData:
-    """
-    Сохраняем в файле "на каком шаге регистрации сейчас пользователь"
-    и, при необходимости, номер телефона, с которым он работает.
-
-    Параметры:
-    - step          — строка с названием шага ("phone", "banks", "main_bank", "no_banks", "completed") или None;
-    - current_phone — номер телефона, с которым сейчас идёт регистрация (или None, если хотим сбросить).
-    """
-    user = get_user(user_id)                        # Загружаем пользователя
-
-    user.registration_step = step                   # Обновляем шаг регистрации
-
-    if current_phone is not None:                   # Если передали конкретный номер телефона
-        user.current_phone = current_phone          # Сохраняем его как "текущий"
-    elif step is None:                              # Если шаг сбрасываем в None
-        user.current_phone = None                   # Заодно сбрасываем и текущий телефон
-
-    save_user(user)                                 # Сохраняем изменения в файл
-    return user                                     # Возвращаем пользователя
-
-
-def get_registration_progress(user_id: int) -> tuple[Optional[str], Optional[str]]:
-    """
-    Возвращаем кортеж (registration_step, current_phone) для указанного пользователя.
-
-    Если пользователь ещё не создавался — будет создан пустой UserData с None в этих полях.
-    """
-    user = get_user(user_id)                        # Получаем пользователя
-    return user.registration_step, user.current_phone  # Возвращаем шаг регистрации и текущий телефон
+    # Здесь mapping уже должен быть в виде {строка chat_id: int message_id}
+    _save_json(LAST_MESSAGES_FILE, mapping)                 # Просто сохраняем dict как JSON
