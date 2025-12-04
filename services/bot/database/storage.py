@@ -5,7 +5,10 @@
 
 Здесь:
 - сохраняем и читаем пользователей в / из JSON-файлов;
-- отдельно храним last_bot_message_id по chat_id в файле last_messages.json.
+- РАНЬШЕ отдельно хранили last_bot_message_id по chat_id в файле last_messages.json.
+  Сейчас актуальное значение last_bot_message_id хранится внутри файла пользователя (см. models.User),
+  а last_messages.json и функции load_last_messages/save_last_messages можно считать легаси-слоем
+  для совместимости (они больше не используются в новом коде, но оставлены, чтобы ничего не сломать).
 """
 
 from __future__ import annotations  # Разрешаем аннотации на будущие версии Python
@@ -23,7 +26,8 @@ BASE_DIR: Path = Path(__file__).resolve().parent
 # Папка, где будем хранить пользователей (по одному JSON-файлу на пользователя)
 USERS_DIR: Path = BASE_DIR / "users"
 
-# Файл, в котором будем хранить ID последнего сообщения бота по каждому chat_id
+# Файл, в котором РАНЬШЕ хранили ID последнего сообщения бота по каждому chat_id.
+# Сейчас фактический last_bot_message_id лежит внутри User, а этот файл считается легаси.
 LAST_MESSAGES_FILE: Path = BASE_DIR / "last_messages.json"
 
 # Гарантируем, что папка для пользователей существует
@@ -89,7 +93,7 @@ def save_user(user: User) -> None:
     Сохранить объект User в JSON-файл.
     """
     path: Path = USERS_DIR / f"{int(user.id)}.json"         # Путь до файла конкретного пользователя
-    data: dict = user.to_dict()                            # Превращаем User в dict
+    data: dict = user.to_dict()                             # Превращаем User в dict
     _save_json(path, data)                                  # Сохраняем dict в JSON
 
 
@@ -98,6 +102,9 @@ def load_last_messages() -> Dict[str, int]:
     Прочитать карту {chat_id: last_bot_message_id} из JSON.
 
     Ключи храним как строки (так проще и надёжнее для JSON).
+
+    ВАЖНО: в актуальной схеме last_bot_message_id хранится в самом User,
+    эта функция оставлена только для обратной совместимости.
     """
     raw_data: dict = _load_json(LAST_MESSAGES_FILE)         # Читаем словарь из файла
 
@@ -121,6 +128,9 @@ def load_last_messages() -> Dict[str, int]:
 def save_last_messages(mapping: Dict[str, int]) -> None:
     """
     Сохранить карту {chat_id: last_bot_message_id} в JSON-файл.
+
+    ВАЖНО: в актуальной схеме last_bot_message_id хранится в самом User,
+    эта функция оставлена только для обратной совместимости.
     """
     # Здесь mapping уже должен быть в виде {строка chat_id: int message_id}
     _save_json(LAST_MESSAGES_FILE, mapping)                 # Просто сохраняем dict как JSON

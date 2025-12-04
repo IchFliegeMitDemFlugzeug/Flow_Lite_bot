@@ -1,10 +1,9 @@
-# services/bot/database/models.py
-
+#services/bot/database/models.py
 """
 Модели данных для файловой "базы данных" бота.
 
 Задача:
-- описать структуру пользователя (User) и телефона (PhoneData);
+- описать структуру пользователя (User), телефона (PhoneData) и банковской карты (CardData);
 - уметь превращать их в словарь (для JSON) и обратно.
 """
 
@@ -57,6 +56,52 @@ class PhoneData:
 
 
 @dataclass
+class CardData:
+    """
+    Информация по одной банковской карте пользователя.
+    """
+    number: str                                             # Номер карты (в нормализованном виде, как строка)
+    bank: Optional[str] = None                              # Код банка, к которому относится карта (например, "tbank", "sber")
+    payment_system: Optional[str] = None                    # Платёжная система ("visa", "mir", "mc" и т.п.)
+
+    def to_dict(self) -> dict:
+        """
+        Преобразуем объект CardData в обычный словарь для сохранения в JSON.
+        """
+        return {
+            "number": self.number,                          # Всегда сохраняем номер карты как строку
+            "bank": self.bank,                              # Код банка или None
+            "payment_system": self.payment_system,          # Код платёжной системы или None
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "CardData":
+        """
+        Восстанавливаем CardData из словаря (например, прочитанного из JSON).
+
+        Если данных нет или формат неожиданный — возвращаем "пустую" карту с минимально безопасными значениями.
+        """
+        if not isinstance(data, dict):                      # Если пришло не dict — нечего восстанавливать
+            # В старых файлах карт могло вообще не быть, поэтому защитимся от падения.
+            return cls(number="")                           # Пустой номер, остальные поля по умолчанию None
+
+        number_raw = data.get("number", "")                 # Берём номер карты (может отсутствовать в старом формате)
+        number = str(number_raw)                            # Приводим к строке на всякий случай
+
+        bank_raw = data.get("bank")                         # Берём код банка (может быть None)
+        bank = str(bank_raw) if bank_raw is not None else None
+
+        ps_raw = data.get("payment_system")                 # Берём платёжную систему (может быть None)
+        payment_system = str(ps_raw) if ps_raw is not None else None
+
+        return cls(
+            number=number,                                  # Номер карты
+            bank=bank,                                      # Код банка или None
+            payment_system=payment_system,                  # Код платёжной системы или None
+        )
+
+
+@dataclass
 class User:
     """
     Модель пользователя, который хранится в файловой "базе".
@@ -70,8 +115,13 @@ class User:
     registration_step: Optional[str] = None                 # Текущий шаг регистрации (например, "phone", "banks", "completed")
     current_phone: Optional[str] = None                     # "Текущий" номер телефона, с которым сейчас работаем
 
+    last_bot_message_id: Optional[int] = None               # ID последнего сообщения бота в этом чате (для remove_keyboard)
+
     phones: Dict[str, PhoneData] = field(default_factory=dict)
     # Словарь "номер телефона" -> PhoneData
+
+    cards: Dict[str, CardData] = field(default_factory=dict)
+    # Словарь "номер карты" -> CardData
 
     def to_dict(self) -> dict:
         """
@@ -84,9 +134,18 @@ class User:
             "username": self.username,                      # username
             "registration_step": self.registration_step,    # Строка шага регистрации или None
             "current_phone": self.current_phone,            # Текущий номер телефона или None
+            "last_bot_message_id": (
+                int(self.last_bot_message_id)               # Явно приводим к int, если не None
+                if self.last_bot_message_id is not None
+                else None
+            ),
             "phones": {
                 phone: phone_data.to_dict()                 # Каждый PhoneData превращаем в словарь
                 for phone, phone_data in self.phones.items()
+            },
+            "cards": {
+                card_number: card_data.to_dict()            # Каждый CardData превращаем в словарь
+                for card_number, card_data in self.cards.items()
             },
         }
 
@@ -105,6 +164,7 @@ class User:
 
         user_id = int(user_id_raw)                          # Принудительно приводим к int
 
+        # --- Восстановление словаря телефонов --- #
         phones_raw = data.get("phones", {})                 # Берём словарь телефонов (или пустой)
         if not isinstance(phones_raw, dict):                # Если там не dict — защищаемся
             phones_raw = {}
@@ -115,6 +175,27 @@ class User:
             phone_str = str(phone)                          # Ключ (номер) приводим к строке
             phones[phone_str] = PhoneData.from_dict(phone_dict)  # Восстанавливаем PhoneData из словаря
 
+        # --- Восстановление словаря банковских карт --- #
+        cards_raw = data.get("cards", {})                   # Берём словарь карт (или пустой)
+        if not isinstance(cards_raw, dict):                 # Если в старом файле лежит не dict — защищаемся
+            cards_raw = {}
+
+        cards: Dict[str, CardData] = {}                     # Сюда будем складывать CardData
+
+        for card_number, card_dict in cards_raw.items():    # Перебираем "номер карты" -> словарь с данными
+            card_number_str = str(card_number)              # Ключ (номер) приводим к строке
+            cards[card_number_str] = CardData.from_dict(card_dict)  # Восстанавливаем CardData из словаря
+
+        # --- Восстановление ID последнего сообщения бота --- #
+        last_bot_message_id_raw = data.get("last_bot_message_id")  # Может отсутствовать в старых файлах
+        if last_bot_message_id_raw is None:                 # Если поля нет или оно явно None
+            last_bot_message_id: Optional[int] = None       # Считаем, что ID ещё не сохранялся
+        else:
+            try:
+                last_bot_message_id = int(last_bot_message_id_raw)  # Пытаемся привести к int
+            except (TypeError, ValueError):
+                last_bot_message_id = None                  # При любой ошибке считаем, что ID нет
+
         return cls(
             id=user_id,                                     # user_id
             first_name=data.get("first_name"),              # Имя (может быть None)
@@ -122,5 +203,7 @@ class User:
             username=data.get("username"),                  # username (может быть None)
             registration_step=data.get("registration_step"),# Шаг регистрации (строка или None)
             current_phone=data.get("current_phone"),        # Текущий номер телефона (или None)
+            last_bot_message_id=last_bot_message_id,        # ID последнего сообщения бота или None
             phones=phones,                                  # Восстановленный словарь телефонов
+            cards=cards,                                    # Восстановленный словарь банковских карт
         )

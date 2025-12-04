@@ -43,10 +43,10 @@ def build_personal_cabinet_keyboard(show_details: bool) -> InlineKeyboardMarkup:
     )
 
     # Кнопка «Квитанции»
-    receipts_button: InlineKeyboardButton = InlineKeyboardButton(
-        text="Квитанции",                  # Текст на кнопке "Квитанции"
-        callback_data="lk:receipts",       # callback_data для обработки нажатия
-    )
+    # receipts_button: InlineKeyboardButton = InlineKeyboardButton(
+    #     text="Квитанции",                  # Текст на кнопке "Квитанции"
+    #     callback_data="lk:receipts",       # callback_data для обработки нажатия
+    # )
 
     # Кнопка «Информация»
     info_button: InlineKeyboardButton = InlineKeyboardButton(
@@ -59,7 +59,7 @@ def build_personal_cabinet_keyboard(show_details: bool) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [toggle_button],               # Первая строка: кнопка "Показать/Скрыть реквизиты"
             [settings_button],             # Вторая строка: "Настройки"
-            [receipts_button],             # Третья строка: "Квитанции"
+            # [receipts_button],             # Третья строка: "Квитанции"
             [info_button],                 # Четвёртая строка: "Информация"
         ]
     )

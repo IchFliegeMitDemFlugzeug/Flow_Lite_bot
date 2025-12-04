@@ -1,5 +1,4 @@
 # services/bot/database/__init__.py
-
 """
 Публичный интерфейс файловой "базы данных" бота.
 
@@ -10,19 +9,19 @@
 - set_registration_progress
 - get_registration_progress
 ПЛЮС:
-- set_last_bot_message_id / get_last_bot_message_id — для хранения ID последнего сообщения бота по chat_id.
+- add_or_update_card / remove_card — для управления банковскими картами пользователя;
+- set_last_bot_message_id / get_last_bot_message_id — для хранения ID последнего сообщения бота
+  УЖЕ В ФАЙЛЕ КОНКРЕТНОГО ЮЗЕРА (без отдельного last_messages.json).
 """
 
 from __future__ import annotations  # Разрешаем "отложенные" аннотации типов
 
 from typing import List, Optional, Tuple  # Типы для аннотаций
 
-from .models import User, PhoneData                    # Импортируем модели
+from .models import User, PhoneData, CardData          # Импортируем модели
 from .storage import (                                 # Импортируем низкоуровневые функции работы с диском
     load_user,
     save_user,
-    load_last_messages,
-    save_last_messages,
 )
 
 
@@ -127,6 +126,68 @@ def get_registration_progress(user_id: int) -> Tuple[Optional[str], Optional[str
     return user.registration_step, user.current_phone  # Возвращаем две строки (или None/None)
 
 
+# --- Банковские карты пользователя --- #
+
+
+def add_or_update_card(
+    user_id: int,
+    card_number: str,
+    bank: Optional[str],
+    payment_system: Optional[str],
+) -> None:
+    """
+    Добавить или обновить банковскую карту пользователя.
+
+    Аргументы:
+    - user_id: ID пользователя.
+    - card_number: номер карты (желательно уже нормализованный, без пробелов).
+    - bank: код банка (как в словаре BANKS) или None.
+    - payment_system: код платёжной системы ("visa", "mir", "mc" и т.п.) или None.
+    """
+    user: User = get_user(user_id)                     # Берём (или создаём) пользователя
+
+    card_number_str = str(card_number).strip()         # Приводим номер карты к "чистой" строке
+    if not card_number_str:                            # Если строка пустая — просто выходим, нечего сохранять
+        return
+
+    existing_card = user.cards.get(card_number_str)    # Пытаемся найти уже существующую карту по этому номеру
+
+    if existing_card is None:                          # Если карты ещё не было
+        card = CardData(                               # Создаём новый объект CardData
+            number=card_number_str,                    # Сохраняем номер карты
+            bank=bank,                                 # Код банка или None
+            payment_system=payment_system,             # Платёжная система или None
+        )
+    else:
+        card = existing_card                           # Если карта уже есть — обновляем её поля
+        card.bank = bank                               # Обновляем код банка
+        card.payment_system = payment_system           # Обновляем платёжную систему
+
+    user.cards[card_number_str] = card                 # Сохраняем/обновляем карту в словаре пользователя
+
+    save_user(user)                                    # Фиксируем изменения на диске
+
+
+def remove_card(
+    user_id: int,
+    card_number: str,
+) -> None:
+    """
+    Удалить банковскую карту пользователя по номеру.
+
+    Если карты с таким номером нет — функция ничего не делает.
+    """
+    user: User = get_user(user_id)                     # Берём (или создаём) пользователя
+
+    card_number_str = str(card_number).strip()         # Нормализуем ключ (номер карты)
+    if not card_number_str:                            # Если передали пустую строку
+        return                                         # Ничего не удаляем
+
+    if card_number_str in user.cards:                  # Проверяем, есть ли такая карта
+        user.cards.pop(card_number_str, None)          # Удаляем запись из словаря
+        save_user(user)                                # Сохраняем изменения (только если реально что-то удалили)
+
+
 # --- Хранение ID последнего сообщения бота по chat_id --- #
 
 
@@ -137,36 +198,32 @@ def set_last_bot_message_id(
     """
     Сохранить ID последнего сообщения бота для конкретного чата.
 
+    ВАЖНО: теперь ID хранится ВНУТРИ файла пользователя (User.last_bot_message_id),
+    а не в отдельном last_messages.json.
+
     Аргументы:
-    - chat_id: ID чата (int).
+    - chat_id: ID чата (int). В приватных чатах совпадает с user_id.
     - message_id: ID сообщения бота (int) или None, если нужно "очистить" запись.
     """
-    mapping = load_last_messages()                     # Загружаем текущую карту {chat_id: message_id}
-    chat_key = str(chat_id)                            # Приводим chat_id к строке (ключ в JSON)
+    user: User = get_user(chat_id)                     # Для приватных чатов chat_id == user_id, берём/создаём пользователя
 
-    if message_id is None:                             # Если передали None
-        mapping.pop(chat_key, None)                    # Удаляем запись для этого чата (если была)
+    if message_id is None:                             # Если нужно "очистить" сохранённый ID
+        user.last_bot_message_id = None                # Обнуляем поле
     else:
-        mapping[chat_key] = int(message_id)            # Сохраняем/обновляем ID сообщения для этого чата
+        user.last_bot_message_id = int(message_id)     # Сохраняем ID последнего сообщения бота как int
 
-    save_last_messages(mapping)                        # Сохраняем обновлённую карту на диск
+    save_user(user)                                    # Фиксируем изменения на диске
 
 
 def get_last_bot_message_id(chat_id: int) -> Optional[int]:
     """
     Получить ID последнего сообщения бота для заданного chat_id.
 
-    Если записи нет — возвращаем None.
+    Если пользователя/файла нет или ID ещё не сохранялся — возвращаем None.
     """
-    mapping = load_last_messages()                     # Читаем карту {chat_id: message_id}
-    chat_key = str(chat_id)                            # Приводим chat_id к строке
+    existing: Optional[User] = load_user(chat_id)      # Пытаемся прочитать пользователя БЕЗ авто-создания
 
-    value = mapping.get(chat_key)                      # Берём значение (если есть)
+    if existing is None:                               # Если файл пользователя ещё не создавался
+        return None                                    # Считаем, что и ID последнего сообщения нет
 
-    if value is None:                                  # Если записи нет — возвращаем None
-        return None
-
-    try:
-        return int(value)                              # Пытаемся привести к int и вернуть
-    except Exception:
-        return None                                    # Если значение битое — считаем, что ID нет
+    return existing.last_bot_message_id                # Возвращаем сохранённый ID (или None)
