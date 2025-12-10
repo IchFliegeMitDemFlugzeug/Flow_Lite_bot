@@ -36,7 +36,7 @@ from ..keyboards.personal_cabinet import (  # Модуль с клавиатур
 from ..headlines.add_headline import (      # Модуль работы с картинками-заголовками
     send_message_with_headline,             # Отправка НОВОГО сообщения с фото + caption
     edit_message_with_headline,             # Редактирование УЖЕ СУЩЕСТВУЮЩЕГО сообщения (фото + caption)
-    HEADLINE_BASE,                          # Тип базовой картинки-заголовка (base_headline.jpg)
+    HEADLINE_LK,                          # Тип базовой картинки-заголовка (base_headline.jpg)
 )
 from ..tools.remove_keyboards import (      # Модуль с утилитами для работы с клавиатурами
     remove_previous_bot_keyboard,           # Функция: убирает клавиатуру у предыдущего сообщения бота по last_bot_message_id
@@ -111,7 +111,7 @@ async def send_personal_cabinet_screen(
     sent_message: Message = await send_message_with_headline(
         message=message,                    # Отправляем "в ответ" на переданное message
         text=cabinet_text,                  # Текст личного кабинета (Markdown)
-        headline_type=HEADLINE_BASE,        # Тип заголовка — базовый
+        headline_type=HEADLINE_LK,        # Тип заголовка — базовый
         reply_markup=keyboard,              # Клавиатура ЛК
         parse_mode="Markdown",              # ЯВНО указываем Markdown (как в add_headline по умолчанию и в main.py)
     )
@@ -191,7 +191,7 @@ async def on_toggle_details_button(
     edited_message: Message = await edit_message_with_headline(
         message=callback.message,           # Сообщение, внутри которого была нажата кнопка
         text=new_text,                      # Новый caption (Markdown)
-        headline_type=HEADLINE_BASE,        # Тип заголовка не меняем — остаётся базовый
+        headline_type=HEADLINE_LK,        # Тип заголовка не меняем — остаётся базовый
         reply_markup=new_keyboard,          # Новая инлайн-клавиатура ЛК
         parse_mode="Markdown",              # Важно: опять Markdown, чтобы *жирный* работал
     )

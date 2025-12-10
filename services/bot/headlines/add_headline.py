@@ -15,7 +15,11 @@ from ..database import set_last_bot_message_id          # Функция из н
 
 HEADLINE_REG_1: str = "reg_1"                          # Тип заголовка для шага регистрации №1 (ввод телефона)
 HEADLINE_REG_2: str = "reg_2"                          # Тип заголовка для шага регистрации №2 (выбор банков)
-HEADLINE_REG_3: str = "reg_3"                          # Тип заголовка для шага регистрации №3 (выбор основного банка)
+HEADLINE_REG_3: str = "reg_3"                           # Тип заголовка для шага регистрации №3 (выбор основного банка)
+HEADLINE_LK: str = "lk.jpg"
+HEADLINE_SETTINGS: str = "settings.jpg"
+HEADLINE_SETTINGS_PHONE_NUMBERS: str = "settings_phone_numbers.jpg"
+HEADLINE_SETTINGS_CARDS: str = "settings_cards.jpg"
 HEADLINE_BASE: str = "base"                            # Базовый тип заголовка для остальных экранов (личный кабинет и т.п.)
 
 
@@ -31,6 +35,10 @@ HEADLINE_FILES: dict[str, Path] = {
     HEADLINE_REG_1: HEADLINES_DIR / "reg_1.jpg",        # Картинка для шага регистрации №1
     HEADLINE_REG_2: HEADLINES_DIR / "reg_2.jpg",        # Картинка для шага регистрации №2
     HEADLINE_REG_3: HEADLINES_DIR / "reg_3.jpg",        # Картинка для шага регистрации №3
+    HEADLINE_LK: HEADLINES_DIR / "lk.jpg",
+    HEADLINE_SETTINGS: HEADLINES_DIR / "settings.jpg",
+    HEADLINE_SETTINGS_PHONE_NUMBERS: HEADLINES_DIR / "settings_phone_numbers.jpg",
+    HEADLINE_SETTINGS_CARDS: HEADLINES_DIR / "settings_cards.jpg",
     HEADLINE_BASE: HEADLINES_DIR / "base_headline.jpg", # Базовая картинка для других экранов
 }
 
