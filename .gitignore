@@ -12,7 +12,7 @@ __pycache__/
 .idea/
 
 services/bot/database/users/
-
+Старые версии( перестраховка)/
 last_messages.json
 
 
