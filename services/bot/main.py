@@ -20,6 +20,9 @@ settings_phone_numbers_router
 from .handlers.settings.cards import (
 settings_cards_router
 )
+from .handlers.inline_mode.inline_query import (
+    inline_mode_router
+)
 from bot.tools.global_guard import (                    # Импортируем глобальный роутер-фильтр
     global_guard_router,                                # Роутер, который чистит "левые" сообщения
 )
@@ -70,6 +73,7 @@ async def main() -> None:
     dp.include_router(settings_router)
     dp.include_router(settings_phone_numbers_router)
     dp.include_router(settings_cards_router)
+    dp.include_router(inline_mode_router)
     dp.include_router(global_guard_router)  # И ТОЛЬКО ПОТОМ подключаем глобальный роутер-фильтр
     # Важно: он должен быть последним, чтобы не перехватывать сообщения раньше нужных хэндлеров
 

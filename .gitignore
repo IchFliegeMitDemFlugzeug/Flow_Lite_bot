@@ -14,5 +14,7 @@ __pycache__/
 services/bot/database/users/
 Старые версии( перестраховка)/
 last_messages.json
+services/bot/headlines/inline_mode/*.png
+services/bot/headlines/inline_mode/*.jpeg
 
 
