@@ -18,7 +18,7 @@ Internally data is stored in MySQL via SQLAlchemy ORM models.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple, Iterable
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
@@ -34,8 +34,6 @@ from .models import (
     PaymentMethodType,
 )
 from .storage import get_session
-
-import time
 
 
 # ============================================================
@@ -271,8 +269,6 @@ def add_or_update_phone(
                 pm.is_primary = is_primary
                 pm.is_active = True
 
-        invalidate_user_payment_methods_cache(tg_user_id)
-
 
 def set_registration_progress(
     user_id: int,
@@ -402,8 +398,6 @@ def add_or_update_card(
             pm.card_brand = payment_system
             pm.is_active = True
 
-        invalidate_user_payment_methods_cache(tg_user_id)
-
 
 def remove_card(
     user_id: int,
@@ -442,8 +436,6 @@ def remove_card(
 
         pm.is_active = False
         pm.is_primary = False
-
-        invalidate_user_payment_methods_cache(tg_user_id)
 
 
 # ============================================================
@@ -495,74 +487,35 @@ def set_last_bot_message_id(
             existing.last_message_id = last_message_str
 
 
-# Получение списка методов получения платежей специалистом
-def list_user_payment_methods(
-    user_id: int,
-    *,
-    only_active: bool = True,
-    method_types: Iterable[PaymentMethodType] | None = None,
-) -> list[DBUserPaymentMethod]:
+def get_last_bot_message_id(chat_id: int) -> Optional[int]:
     """
-    Read user's payment methods from DB.
+    Get the last bot message ID for a given chat_id.
 
-    user_id here is Telegram user_id (tg_user_id).
-    Returns rows from user_payment_methods for this user.
+    If there is no user/chat record, returns None.
     """
-    tg_user_id = int(user_id)
+    chat_id_int = int(chat_id)
 
-    with get_session() as session:  # контекстный менеджер с commit/rollback :contentReference[oaicite:1]{index=1}
-        db_user = session.execute(
-            select(DBUser).where(DBUser.tg_user_id == tg_user_id)
+    with get_session() as session:
+        db_user: Optional[DBUser] = session.execute(
+            select(DBUser).where(DBUser.tg_user_id == chat_id_int)
         ).scalar_one_or_none()
 
         if db_user is None:
-            return []
+            return None
 
-        stmt = select(DBUserPaymentMethod).where(DBUserPaymentMethod.user_id == db_user.id)
+        last_msg: Optional[ChatLastMessage] = session.execute(
+            select(ChatLastMessage).where(
+                and_(
+                    ChatLastMessage.user_id == db_user.id,
+                    ChatLastMessage.chat_id == chat_id_int,
+                )
+            )
+        ).scalar_one_or_none()
 
-        if only_active:
-            stmt = stmt.where(DBUserPaymentMethod.is_active.is_(True))
+        if last_msg is None or last_msg.last_message_id is None:
+            return None
 
-        if method_types:
-            stmt = stmt.where(DBUserPaymentMethod.method_type.in_(list(method_types)))
-
-        # Удобная сортировка: тип, primary, банк, номер
-        stmt = stmt.order_by(
-            DBUserPaymentMethod.method_type,
-            DBUserPaymentMethod.is_primary.desc(),
-            DBUserPaymentMethod.provider,
-            DBUserPaymentMethod.pay_method_number,
-        )
-
-        return session.execute(stmt).scalars().all()
-
-
-_PM_CACHE: dict[tuple[int, bool, tuple[str, ...]], tuple[float, list[DBUserPaymentMethod]]] = {}
-_PM_CACHE_TTL_SEC = 120.0
-
-
-def invalidate_user_payment_methods_cache(user_id: int) -> None:
-    tg_user_id = int(user_id)
-    for k in list(_PM_CACHE.keys()):
-        if k[0] == tg_user_id:
-            _PM_CACHE.pop(k, None)
-
-
-def list_user_payment_methods_cached(
-    user_id: int,
-    *,
-    only_active: bool = True,
-    method_types: Iterable[PaymentMethodType] | None = None,
-) -> list[DBUserPaymentMethod]:
-    tg_user_id = int(user_id)
-    mt_key = tuple(sorted([(mt.value if isinstance(mt, PaymentMethodType) else str(mt)) for mt in (method_types or [])]))
-    key = (tg_user_id, only_active, mt_key)
-
-    now = time.monotonic()
-    cached = _PM_CACHE.get(key)
-    if cached and cached[0] > now:
-        return cached[1]
-
-    data = list_user_payment_methods(user_id, only_active=only_active, method_types=method_types)
-    _PM_CACHE[key] = (now + _PM_CACHE_TTL_SEC, data)
-    return data
+        try:
+            return int(last_msg.last_message_id)
+        except (TypeError, ValueError):
+            return None

@@ -74,6 +74,11 @@ async def send_personal_cabinet_screen(
     6) Сохраняем ID этого сообщения и флаг lk_show_details в FSM (last_bot_message_id, lk_show_details).
     """
 
+    # Получаем ID пользователя НЕ из FSM, а напрямую из сообщения.
+    # Важно: при callback-запросах message.from_user указывает на бота, поэтому берём chat.id,
+    # который совпадает с Telegram ID пользователя и точно привязан к его данным в БД.
+    user_id: int = message.chat.id
+
     # По умолчанию считаем, что реквизиты скрыты (кнопка будет "Показать реквизиты")
     show_details: bool = False
 
@@ -98,7 +103,7 @@ async def send_personal_cabinet_screen(
     #  - не генерировать последовательность "***" (например, "Телефон *** 44-55"),
     #    либо оборачивать её в `код`, иначе Telegram выдаст ошибку разбора разметки.
     cabinet_text: str = build_personal_cabinet_text(
-        user_id=message.from_user.id,       # Передаём Telegram ID пользователя
+        user_id=user_id,                    # Передаём Telegram ID пользователя, вычисленный по chat.id
         show_details=show_details,          # Флаг "показать реквизиты" / "скрыть реквизиты"
     )
 
