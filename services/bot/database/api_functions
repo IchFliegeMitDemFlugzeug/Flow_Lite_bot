@@ -1,0 +1,60 @@
+Функции для добавления/изменения/удаления юзеров/телефонов/карт/банков
+- update_basic_user_info - обновляет имя и username юзера или создает нового юзера, если вводимого user_id еще нет
+- add_or_update_phone    - добавляет новый телефон и банки, привязанные к нему;
+                           так же может активировать/деактивировать уже привязанные ранее банки
+- add_or_update_card     - добавляет новую карту;
+                           так же может менять название банка или платежной системы
+- remove_card            - деактивирует ранее добавленную карту
+- remove_phone           - деактивирует ранее добавленный номер телефона
+
+Функции для работы с местонахождением юзера в боте
+- set_registration_progress
+- get_registration_progress
+- set_last_bot_message_id
+- get_last_bot_message_id
+
+
+update_basic_user_info(
+    user_id: int,
+    first_name: Optional[str],
+    last_name: Optional[str],
+    username: Optional[str],
+)
+Достаточно ввести user_id в формате update_basic_user_info(23432423), чтобы добавить нового юзера в БД.
+Остальные параметры опциональны
+
+
+add_or_update_phone(
+    user_id: int,
+    phone: str,
+    banks: List[str],
+    main_bank: Optional[str],
+)
+Необходимо указать user_id и phone (строкой).
+Если хочешь закрепить за этим телефоном банки, то просто списком (['sber', 'wb']) передай их в параметр banks.
+Основной банк передавай строкой в main_bank.
+
+
+add_or_update_card(
+    user_id: int,
+    card_number: str,
+    bank: Optional[str],
+    payment_system: Optional[str],
+)
+Необходимо указать user_id и card_number (строкой).
+Если хочешь закрепить за этим телефоном банк, то передай его в параметр bank строкой.
+Можно так же указать платежную систему (Visa, Mastercard, Mir).
+
+
+remove_card(
+    user_id: int,
+    card_number: str,
+)
+Просто передай user_id и номер карты строкой для ее деактивации
+
+
+remove_phone(
+    user_id: int,
+    phone_number: str,
+)
+Просто передай user_id и номер телефона строкой для его деактивации
