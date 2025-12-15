@@ -435,50 +435,169 @@ def _iter_user_cards_with_bank_filter(
 
 def build_inline_payment_options(
     *,
-    user: User,
-    parsed_query: ParsedInlineQuery,
+    user: User,                           # Доменная модель пользователя со всеми реквизитами
+    parsed_query: ParsedInlineQuery,      # Результат работы парсера (сумма + список банков)
 ) -> List[InlinePaymentOption]:
     """
-    Главная функция модуля: собирает ВСЕ варианты для inline-списка.
+    Собираем ВСЕ варианты для inline-списка с учётом НОВОЙ логики:
 
-    Вход:
-        user         — доменная модель пользователя (с телефонами/картами);
-        parsed_query — результат работы парсера (сумма, банк, candidate).
+    1) Если в запросе указаны банки (parsed_query.bank_codes НЕ пустой):
+       - для каждого bank_code_filter из parsed_query.bank_codes
+         собираем телефоны и карты, у которых есть этот банк;
+       - добавляем всё в один общий список.
 
-    Выход:
-        список InlinePaymentOption, в котором уже:
-        - заголовки и описания соответствуют схемам;
-        - применён фильтр по банку (если он есть);
-        - учтено наличие/отсутствие суммы.
+    2) Если в запросе НЕТ ни одного банка (parsed_query.bank_codes пустой):
+       - по КАЖДОМУ телефону пользователя делаем:
+           а) вариант "со всеми банками" (банк не фиксируем, платёжщик выбирает свой),
+           б) вариант с ОСНОВНЫМ банком, если он задан;
+       - по картам делаем один вариант (у карты и так один банк).
     """
-    amount = parsed_query.amount                                   # Сумма, которую ввёл пользователь (или None)
-    bank_code_filter = parsed_query.bank_code                      # Банк из парсера (или None)
 
-    # 1) Собираем все подходящие телефоны с учётом фильтра по банку
-    phone_options = _iter_user_phones_with_bank_filter(
-        user=user,
-        bank_code_filter=bank_code_filter,
-    )
+    amount = parsed_query.amount                           # Сумма из запроса (или None)
+    bank_codes = parsed_query.bank_codes or []             # Список всех распарсенных банков (может быть пустым)
 
-    # 2) Собираем все подходящие карты с учётом фильтра по банку
-    card_options = _iter_user_cards_with_bank_filter(
-        user=user,
-        bank_code_filter=bank_code_filter,
-    )
+    all_options: List[InlinePaymentOption] = []            # Итоговый список вариантов
 
-    # Объединяем телефоны и карты в один список
-    all_options: List[InlinePaymentOption] = phone_options + card_options
+    # ---------------------------------------------------------------------
+    # 1. СЛУЧАЙ, КОГДА ПОЛЬЗОВАТЕЛЬ ЯВНО УКАЗАЛ БАНКИ В СООБЩЕНИИ
+    #    Пример: "500 Сбер и Т-Банк"
+    # ---------------------------------------------------------------------
+    if bank_codes:                                         # Если в запросе есть хотя бы один банк
+        for bank_code_filter in bank_codes:                # Перебираем КАЖДЫЙ найденный банк
+            # 1.1. Телефоны, у которых есть этот банк
+            phone_options = _iter_user_phones_with_bank_filter(
+                user=user,
+                bank_code_filter=bank_code_filter,         # Фильтруем только по ЭТОМУ банку
+            )
 
-    # 3) Подставляем сумму в заголовки и дописываем сумму/банк в описания
+            # 1.2. Карты, у которых привязан этот банк
+            card_options = _iter_user_cards_with_bank_filter(
+                user=user,
+                bank_code_filter=bank_code_filter,
+            )
+
+            # 1.3. Добавляем всё в общий список
+            all_options.extend(phone_options)
+            all_options.extend(card_options)
+
+        # После этого all_options содержит варианты:
+        # - по всем телефонам и картам с банками из bank_codes,
+        # - но пока ещё с amount=None и "черновыми" title/description.
+    else:
+        # -----------------------------------------------------------------
+        # 2. ДЕФОЛТНЫЙ СЛУЧАЙ: В ЗАПРОСЕ НЕТ НИ ОДНОГО БАНКА
+        #    Примеры: "@bot", "@bot 500", "500 переведи, пожалуйста"
+        #
+        # Требование:
+        #   - по КАЖДОМУ телефону:
+        #       а) вариант "со всеми банками" (банк не фиксируем),
+        #       б) вариант с основным банком (если он выбран);
+        #   - по картам оставляем один вариант (с их банком).
+        # -----------------------------------------------------------------
+
+        # 2.1. Телефоны пользователя
+        for phone, phone_data in user.phones.items():
+            # Короткое отображение номера (последние 4 цифры "22 44")
+            phone_display = _format_phone_short(phone)
+
+            # -------------------------------
+            # 2.1.1. Вариант "со всеми банками"
+            # -------------------------------
+            # Этот вариант означает: клиент может перевести с ЛЮБОГО своего банка
+            # (через СБП, где это поддерживается). Мы банк НЕ фиксируем.
+            if phone_data.banks:                          # Имеет смысл только если к номеру привязаны какие-то банки
+                if amount is not None:                    # Есть сумма
+                    title_all = f"Перевод {amount}Р, номер {phone_display}"
+                else:                                     # Суммы нет
+                    title_all = f"Перевод, номер {phone_display}"
+
+                # Базовый текст описания
+                base_desc = f"Будет отправлен запрос перевода по номеру телефона {phone_display}"
+
+                # Детализация в зависимости от наличия суммы
+                if amount is not None:
+                    description_all = (
+                        f"{base_desc} (сумму {amount}Р плательщик переведёт "
+                        f"с любого удобного ему банка)"
+                    )
+                else:
+                    description_all = (
+                        f"{base_desc} (банк плательщик выберет сам)"
+                    )
+
+                # Создаём вариант без жёстко заданного банка (bank_code=None)
+                all_options.append(
+                    InlinePaymentOption(
+                        payment_type="phone",            # Тип — телефон
+                        identifier=phone,                # Полный номер телефона
+                        title=title_all,                 # Заголовок "Перевод ..., номер 22 44"
+                        description=description_all,     # Описание про выбор банка плательщиком
+                        amount=amount,                   # Сумма из запроса
+                        bank_code=None,                  # Банк не фиксирован (ВСЕ банки)
+                    )
+                )
+
+            # -------------------------------
+            # 2.1.2. Вариант с ОСНОВНЫМ банком
+            # -------------------------------
+            main_bank_code = phone_data.main_bank        # Код основного банка (если задан)
+
+            if main_bank_code:                           # Если основной банк есть
+                bank_title = _get_bank_display_title(main_bank_code)  # "Сбер", "Т-Банк", ...
+
+                # Здесь уже используем стандартные функции построения заголовка/описания
+                title_main = _build_phone_title(
+                    phone_display=phone_display,
+                    amount=amount,
+                    bank_title=bank_title,
+                )
+
+                description_main = _build_phone_description(
+                    phone_display=phone_display,
+                    amount=amount,
+                    bank_title=bank_title,
+                )
+
+                all_options.append(
+                    InlinePaymentOption(
+                        payment_type="phone",
+                        identifier=phone,
+                        title=title_main,
+                        description=description_main,
+                        amount=amount,
+                        bank_code=main_bank_code,       # Жёстко фиксируем основной банк
+                    )
+                )
+
+        # 2.2. Карты пользователя — для них логика проще
+        #      У карты есть один банк, поэтому "со всеми банками" нет смысла
+        card_options = _iter_user_cards_with_bank_filter(
+            user=user,
+            bank_code_filter=None,                        # Без фильтра — просто все карты
+        )
+        all_options.extend(card_options)
+
+    # ---------------------------------------------------------------------
+    # 3. ФИНАЛЬНАЯ ДОПРАВКА ВСЕХ ВАРИАНТОВ:
+    #    - выставляем сумму;
+    #    - пересобираем title/description для тех вариантов, где банк конкретный.
+    #    Для "all banks"-вариантов (bank_code=None) мы title/description
+    #    уже собрали вручную выше — их трогать не будем.
+    # ---------------------------------------------------------------------
     for option in all_options:
-        # Определяем человекочитаемое название банка
-        bank_title = _get_bank_display_title(option.bank_code or bank_code_filter)
-
-        # Обновляем amount в самой структуре варианта
+        # Обновляем сумму внутри структуры (на всякий случай)
         option.amount = amount
 
-        if option.payment_type == "phone":                        # Для телефонов
-            phone_display = _format_phone_short(option.identifier)  # Короткое отображение ("22 44")
+        # Если банк НЕ задан (bank_code=None), это как раз "all banks"-вариант телефона.
+        # Его title/description уже сформированы вручную — НЕ трогаем.
+        if option.bank_code is None and option.payment_type == "phone":
+            continue
+
+        # Для остальных вариантов (конкретные банки или карты) — пересобираем
+        bank_title = _get_bank_display_title(option.bank_code)
+
+        if option.payment_type == "phone":
+            phone_display = _format_phone_short(option.identifier)
 
             option.title = _build_phone_title(
                 phone_display=phone_display,
@@ -490,8 +609,8 @@ def build_inline_payment_options(
                 amount=amount,
                 bank_title=bank_title,
             )
-        else:                                                      # Для карт
-            card_display = _format_card_short(option.identifier)   # Короткое отображение ("1234")
+        else:
+            card_display = _format_card_short(option.identifier)
 
             option.title = _build_card_title(
                 card_display=card_display,
@@ -504,7 +623,8 @@ def build_inline_payment_options(
                 bank_title=bank_title,
             )
 
-    return all_options                                             # Возвращаем готовый список вариантов
+    return all_options
+
 
 
 # ---------------------------------------------------------------------------

@@ -1,36 +1,37 @@
-# -*- coding: utf-8 -*-  # Указываем кодировку файла, чтобы корректно работать с кириллицей
+# services/bot/tools/inline_mode/query_parser.py
+
+# -*- coding: utf-8 -*-                          # Указываем кодировку файла
 
 """
 Парсер текстового запроса для INLINE-режима бота.
 
-Примеры входа (raw_query — то, что после @bot_bot):
-    "500"
-    "500 Сбер"
-    "500 скинь, пожалуйста, на Т-банк как обычно"
-    "Сбер"
-    "ХуйБанк"
-    "500 ПСБ зарплата за декабрь"
+Теперь учитываем, что в запросе может быть НЕСКОЛЬКО банков.
+Примеры raw_query (то, что после @bot_bot):
 
-Наша задача:
-1) Найти сумму перевода (если есть) — первую последовательность цифр.
-2) Найти банк в большом сообщении:
-   - пробегаемся по всему тексту;
-   - для каждого банка из BANKS берём:
-       * code          (например, "mkb"),
-       * button_title  ("МКБ"),
-       * message_title ("Московский Кредитный Банк");
-   - сравниваем без учёта регистра, пробелов, дефисов и прочих символов.
-3) Сохранить «кандидата» банка, даже если его нет в словаре:
-   - нужно для сценариев типа "@bot_bot ХуйБанк".
+    "500 Сбер и Т-Банк"
+    "500р ПСБ, потом на Т-Банк"
+    "Сбер ПСБ Т-Банк"
+    "500, сначала МКБ, потом ПСБ"
+    "привет, как обычно Сбер или Т-Банк"
+
+Задача парсера:
+1) Найти сумму (если есть) — первую последовательность цифр.
+2) Найти ВСЕ банки, которые упоминаются в сообщении и есть в словаре BANKS.
+3) Сохранить:
+   - raw_query       — исходный текст;
+   - amount          — сумма (int | None);
+   - bank_codes      — список кодов банков (["sber", "tbank", ...]);
+   - bank_code       — первый из bank_codes (для совместимости);
+   - bank_candidate  — текст-кандидат на банк (если bank_codes пустой).
 """
 
-from __future__ import annotations                      # Разрешаем "отложенные" аннотации типов (удобно для type hints)
+from __future__ import annotations                      # Разрешаем отложенные аннотации типов
 
-import re                                                # Модуль регулярных выражений — ищем числа, чистим текст
-from dataclasses import dataclass                       # dataclass — компактное описание структуры результата
-from typing import Optional                             # Optional[T] = T | None для читаемых аннотаций
+import re                                               # Регулярные выражения — для поиска чисел/чистки текста
+from dataclasses import dataclass                       # dataclass — удобные "структуры данных"
+from typing import Optional, List                       # Optional[T] и List[T] — для аннотаций типов
 
-from ..banks_wordbook import BANKS                    # Наш словарь банков: code, button_title, message_title и т.д.
+from ..banks_wordbook import BANKS                      # Словарь банков (code, button_title, message_title, ...)
 
 
 # ------------------------- #
@@ -46,12 +47,15 @@ class ParsedInlineQuery:
     Поля:
         raw_query      — исходный текст (как пришёл от Telegram).
         amount         — сумма перевода (int) или None.
-        bank_code      — внутренний код банка из BANKS (например, "sber", "tbank") или None.
-        bank_candidate — текст-кандидат на банк (когда банк не найден в словаре).
+        bank_codes     — список всех найденных кодов банков (в порядке обнаружения).
+        bank_code      — первый банк из bank_codes (для совместимости со старым кодом).
+        bank_candidate — текст-кандидат на банк, если банки по словарю не найдены.
     """
+
     raw_query: str                                      # Оригинальный текст запроса
     amount: Optional[int]                               # Найденная сумма или None
-    bank_code: Optional[str]                            # Код банка из словаря или None
+    bank_codes: List[str]                               # Список всех кодов банков (может быть пустым)
+    bank_code: Optional[str]                            # Первый код из bank_codes или None
     bank_candidate: Optional[str]                       # Текст-кандидат (для неизвестных банков) или None
 
 
@@ -77,8 +81,7 @@ def _normalize_bank_text(text: str) -> str:
     """
     text = (text or "").lower()                       # Приводим к нижнему регистру, защищаемся от None
     text = text.replace("ё", "е")                     # Убираем различие между "е" и "ё"
-    # Удаляем пробелы, дефисы, точки, запятые, кавычки и скобки
-    text = re.sub(r"[\s\-\.,\"'«»()]+", "", text)
+    text = re.sub(r"[\s\-\.,\"'«»()]+", "", text)     # Удаляем пробелы и знаки препинания
     return text                                       # Возвращаем нормализованный текст
 
 
@@ -94,7 +97,7 @@ def _strip_amount_tokens(raw: str) -> str:
         "500 rub"
         "500₽"
         "500 руб."
-    и заменяем их на пробел, чтобы при поиске банка они не мешали.
+    и заменяем их на пробел, чтобы при поиске банков они не мешали.
 
     Примеры:
         "500 Сбер"                 -> " Сбер"
@@ -113,7 +116,7 @@ def _extract_amount(raw: str) -> Optional[int]:
     """
     Ищем сумму перевода в строке.
 
-    Логика (простая, как обсуждали):
+    Логика:
     - находим ПЕРВУЮ последовательность цифр;
     - считаем её суммой;
     - всё остальное игнорируем.
@@ -144,30 +147,30 @@ def _extract_bank_candidate_without_dict(raw: str) -> Optional[str]:
     """
     Выделяем текст-кандидат на банк БЕЗ использования словаря BANKS.
 
-    Нужен для сценариев, когда банк НЕ найден в словаре, но пользователь
-    явно что-то написал (например, "ХуйБанк").
+    Нужен для сценариев, когда:
+    - ни один банк по словарю не расшифровался,
+    - но пользователь явно что-то написал (например, "ХуйБанк").
 
     Логика:
     - убираем сумму/валюту из строки;
     - сжимаем пробелы;
     - если что-то осталось — возвращаем как candidate.
 
-    Минус: если пользователь напишет целое предложение,
-    candidate может содержать не только банк, но это ок для первых версий.
+    Важно: если пользователь написал целое предложение,
+    candidate может содержать не только банк — это нормально для первых версий.
     """
     if not raw:                                      # Пустой ввод — кандидата нет
         return None
 
     without_amount = _strip_amount_tokens(raw)       # Выкидываем числа + валюту
-    # Схлопываем повторяющиеся пробелы и обрезаем края
-    candidate = re.sub(r"\s+", " ", without_amount).strip()
+    candidate = re.sub(r"\s+", " ", without_amount).strip()  # Сжимаем пробелы и обрезаем края
 
     return candidate or None                         # Пустую строку превращаем в None
 
 
-def _detect_bank_code_from_full_text(raw: str) -> Optional[str]:
+def _detect_all_bank_codes_from_full_text(raw: str) -> List[str]:
     """
-    Находим банк в ПОЛНОМ тексте сообщения, используя словарь BANKS.
+    Находим ВСЕ банки в ПОЛНОМ тексте сообщения, используя словарь BANKS.
 
     Алгоритм:
     1) Удаляем из текста сумму/валюту (чтобы не мешали).
@@ -175,47 +178,49 @@ def _detect_bank_code_from_full_text(raw: str) -> Optional[str]:
     3) Для каждого банка из BANKS:
         - берём code, button_title, message_title;
         - нормализуем каждое поле;
-        - если norm_variant содержится в norm_text ИЛИ наоборот
-          (norm_text в norm_variant) — считаем, что банк найден.
+        - если norm_variant содержится в norm_text — считаем, что банк есть в сообщении.
 
-    Примеры:
-        "Сбер"                          -> "sber"
-        "сбербанк"                      -> "sber"
-        "500 Т-Банк зарплата"          -> "tbank"
-        "500р Московский Кредитный"    -> "mkb"
+    Возвращаем:
+        Список КОДОВ банков (["sber", "tbank", "mkb", ...]) без повторов,
+        в порядке обхода BANKS (обычно стабилен, т.к. dict insertion-ordered).
     """
-    if not raw:                                      # Пустой ввод — банк найти нельзя
-        return None
+    if not raw:                                      # Пустой ввод — ничего не найдём
+        return []
 
     text_without_amount = _strip_amount_tokens(raw)  # Убираем суммы и валюту
-    norm_text = _normalize_bank_text(text_without_amount)  # Нормализуем всё, что осталось
+    norm_text = _normalize_bank_text(text_without_amount)  # Нормализуем текст
 
-    if not norm_text:                                # Если текст полностью "съели"
-        return None                                  # Считаем, что банка нет
+    if not norm_text:                                # Если всё "съели"
+        return []                                    # Банков не нашли
 
-    # Перебираем все банки из словаря
-    for bank_data in BANKS.values():
-        # Собираем все варианты строк, по которым будем искать совпадения
+    found_codes: List[str] = []                     # Сюда сложим коды найденных банков
+
+    for bank_data in BANKS.values():                # Перебираем ВСЕ банки из словаря
+        code = bank_data.get("code") or ""          # Код банка (например, "sber", "tbank")
+        if not code:                                # Если кода нет — такой банк пропускаем
+            continue
+
+        # Собираем варианты строк, по которым будем искать совпадения
         variants = [
-            bank_data.get("code") or "",             # Внутренний код (например, "mkb")
-            bank_data.get("button_title") or "",     # Название на кнопке (например, "МКБ")
-            bank_data.get("message_title") or "",    # Полное название (например, "Московский Кредитный Банк")
+            code,                                   # Сам code тоже может встречаться в тексте
+            bank_data.get("button_title") or "",
+            bank_data.get("message_title") or "",
         ]
 
-        for variant in variants:                     # Перебираем варианты одной записи банка
-            norm_variant = _normalize_bank_text(variant)  # Нормализуем вариант
+        for variant in variants:                    # Перебираем варианты одной записи банка
+            norm_variant = _normalize_bank_text(variant)  # Нормализуем
 
-            if not norm_variant:                     # Пустые варианты пропускаем
+            if not norm_variant:                   # Пустые строки пропускаем
                 continue
 
-            # Считаем совпаданием любой вариант подстрочного включения:
-            # - "сбер" содержится в "сбербанк"
-            # - "московскийкредитныйбанк" == "московскийкредитныйбанк"
-            if norm_variant in norm_text or norm_text in norm_variant:
-                return bank_data.get("code")         # Возвращаем код банка (например, "mkb")
+            # Если нормализованное название банка встречается в нормализованном тексте —
+            # считаем, что банк присутствует в сообщении.
+            if norm_variant in norm_text:
+                if code not in found_codes:        # Не даём повторяться кодам
+                    found_codes.append(code)       # Добавляем код в список найденных
+                break                              # Выходим из цикла по variants для этого банка
 
-    # Если ни один банк не подошёл — возвращаем None
-    return None
+    return found_codes                             # Возвращаем список кодов (может быть пустой)
 
 
 # ------------------------- #
@@ -234,31 +239,32 @@ def parse_inline_query(raw_query: Optional[str]) -> ParsedInlineQuery:
         ParsedInlineQuery:
             raw_query      — исходный текст;
             amount         — сумма или None;
-            bank_code      — код банка из BANKS или None;
-            bank_candidate — текст-кандидат на банк или None.
-
-    Функция НЕ бросает исключений — в худшем случае вернёт всё None,
-    кроме raw_query (там будет хотя бы пустая строка).
+            bank_codes     — список всех найденных кодов банков;
+            bank_code      — первый из bank_codes или None;
+            bank_candidate — текст-кандидат, если банки по словарю не найдены.
     """
-    safe_raw = (raw_query or "").strip()             # Гарантируем строку и убираем пробелы по краям
+    safe_raw = (raw_query or "").strip()           # Гарантируем строку и убираем пробелы по краям
 
     # --- Шаг 1. Ищем сумму перевода --- #
-    amount = _extract_amount(safe_raw)               # Находим первую группу цифр
+    amount = _extract_amount(safe_raw)             # Находим первую группу цифр
 
-    # --- Шаг 2. Ищем банк в ПОЛНОМ сообщении по словарю BANKS --- #
-    bank_code = _detect_bank_code_from_full_text(safe_raw)  # Пытаемся сопоставить с известными банками
+    # --- Шаг 2. Ищем ВСЕ банки в тексте по словарю BANKS --- #
+    bank_codes = _detect_all_bank_codes_from_full_text(safe_raw)  # Список кодов или []
 
-    # --- Шаг 3. Формируем текст-кандидат на банк --- #
-    if bank_code is None:                            # Если банк не распознан по словарю
-        bank_candidate = _extract_bank_candidate_without_dict(safe_raw)  # Пробуем вытащить текст
+    # --- Шаг 3. Определяем "главный" банк (первый найденный) --- #
+    bank_code = bank_codes[0] if bank_codes else None             # Для совместимости с кодом, который ждёт один банк
+
+    # --- Шаг 4. Если ни одного банка не нашли — пробуем выделить текст-кандидат --- #
+    if not bank_codes:
+        bank_candidate = _extract_bank_candidate_without_dict(safe_raw)  # Текст без суммы/валюты
     else:
-        # Если банк найден, candidate нам не нужен — дальше используем bank_code и BANKS[bank_code]
-        bank_candidate = None
+        bank_candidate = None                                   # Если банки есть, candidate не нужен
 
     # Собираем dataclass с результатом и возвращаем его хэндлеру
     return ParsedInlineQuery(
-        raw_query=safe_raw,
-        amount=amount,
-        bank_code=bank_code,
-        bank_candidate=bank_candidate,
+        raw_query=safe_raw,                                     # Исходный текст
+        amount=amount,                                          # Найденная сумма (или None)
+        bank_codes=bank_codes,                                  # Все коды банков
+        bank_code=bank_code,                                    # Первый код (или None)
+        bank_candidate=bank_candidate,                          # Текст-кандидат для неизвестного банка
     )
