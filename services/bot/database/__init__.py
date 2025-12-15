@@ -1,46 +1,167 @@
 # services/bot/database/__init__.py
 """
-Публичный интерфейс файловой "базы данных" бота.
+Public database interface for the bot.
 
-Здесь функции, которыми пользуются хэндлеры:
+External API (used by handlers) stays the same:
 - get_user
 - update_basic_user_info
 - add_or_update_phone
 - set_registration_progress
 - get_registration_progress
-ПЛЮС:
-- add_or_update_card / remove_card — для управления банковскими картами пользователя;
-- set_last_bot_message_id / get_last_bot_message_id — для хранения ID последнего сообщения бота
-  УЖЕ В ФАЙЛЕ КОНКРЕТНОГО ЮЗЕРА (без отдельного last_messages.json).
+- add_or_update_card
+- remove_card
+- set_last_bot_message_id
+- get_last_bot_message_id
+
+Internally data is stored in MySQL via SQLAlchemy ORM models.
 """
 
-from __future__ import annotations  # Разрешаем "отложенные" аннотации типов
+from __future__ import annotations
 
-from typing import List, Optional, Tuple  # Типы для аннотаций
+from typing import Dict, List, Optional, Tuple, Iterable
 
-from .models import User, PhoneData, CardData          # Импортируем модели
-from .storage import (                                 # Импортируем низкоуровневые функции работы с диском
-    load_user,
-    save_user,
+from sqlalchemy import and_, select
+from sqlalchemy.orm import Session
+
+from .models import (
+    User,                   # domain dataclass
+    PhoneData,
+    CardData,
+    DBUser,                 # ORM models
+    DBUserPaymentMethod,
+    BotLastStep,
+    ChatLastMessage,
+    PaymentMethodType,
 )
+from .storage import get_session
+
+import time
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+
+def _get_or_create_db_user(session: Session, tg_user_id: int) -> DBUser:
+    """
+    Find user by Telegram user_id in 'users' table or create a new row.
+    """
+    tg_user_id = int(tg_user_id)
+
+    db_user = session.execute(
+        select(DBUser).where(DBUser.tg_user_id == tg_user_id)
+    ).scalar_one_or_none()
+
+    if db_user is None:
+        db_user = DBUser(tg_user_id=tg_user_id)
+        session.add(db_user)
+        session.flush()  # ensure db_user.id is populated
+
+    return db_user
+
+
+# ============================================================
+# Public functions
+# ============================================================
 
 
 def get_user(user_id: int) -> User:
     """
-    Получить (или создать) пользователя по user_id.
+    Get (or create) a user by Telegram user_id.
 
-    Если файл существует — читаем и возвращаем его.
-    Если нет — создаём "пустого" пользователя и сразу сохраняем.
+    Returns a domain User instance assembled from MySQL:
+    - basic fields from 'users';
+    - phones and cards from 'user_payment_methods';
+    - registration_step and current_phone/card from 'bot_last_step';
+    - last_bot_message_id from 'chat_last_message'.
     """
-    existing: Optional[User] = load_user(user_id)      # Пытаемся прочитать пользователя с диска
+    tg_user_id = int(user_id)
 
-    if existing is not None:                           # Если файл существует и корректен
-        return existing                                # Возвращаем его
+    with get_session() as session:
+        db_user = _get_or_create_db_user(session, tg_user_id)
 
-    # Файла нет — создаём нового пользователя "с нуля"
-    user = User(id=int(user_id))                       # Создаём пользователя с заданным user_id
-    save_user(user)                                    # Сразу сохраняем его, чтобы файл появился на диске
-    return user                                        # Возвращаем созданного пользователя
+        # ----- phones and cards from user_payment_methods -----
+        phones: Dict[str, PhoneData] = {}
+        cards: Dict[str, CardData] = {}
+
+        for pm in db_user.payment_methods:
+            if not pm.is_active:
+                continue
+
+            if pm.method_type == PaymentMethodType.phone:
+                phone_number = pm.pay_method_number
+                if not phone_number:
+                    continue
+
+                phone_data = phones.get(phone_number)
+                if phone_data is None:
+                    phone_data = PhoneData()
+                    phones[phone_number] = phone_data
+
+                if pm.provider:
+                    if pm.provider not in phone_data.banks:
+                        phone_data.banks.append(pm.provider)
+                    if pm.is_primary:
+                        phone_data.main_bank = pm.provider
+
+            elif pm.method_type == PaymentMethodType.card:
+                card_number = pm.pay_method_number
+                if not card_number:
+                    continue
+
+                cards[card_number] = CardData(
+                    number=card_number,
+                    bank=pm.provider,
+                    payment_system=pm.card_brand,
+                )
+
+        # ----- registration progress from bot_last_step -----
+        bot_step = session.execute(
+            select(BotLastStep).where(
+                and_(
+                    BotLastStep.user_id == db_user.id,
+                    BotLastStep.chat_id == tg_user_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        registration_step: Optional[str] = None
+        current_phone: Optional[str] = None
+
+        if bot_step is not None:
+            registration_step = bot_step.last_step
+            current_phone = bot_step.pay_method_number
+
+        # ----- last bot message from chat_last_message -----
+        last_bot_message_id: Optional[int] = None
+
+        last_msg = session.execute(
+            select(ChatLastMessage).where(
+                and_(
+                    ChatLastMessage.user_id == db_user.id,
+                    ChatLastMessage.chat_id == tg_user_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if last_msg is not None and last_msg.last_message_id is not None:
+            try:
+                last_bot_message_id = int(last_msg.last_message_id)
+            except (TypeError, ValueError):
+                last_bot_message_id = None
+
+        return User(
+            id=tg_user_id,
+            first_name=db_user.first_name,
+            last_name=db_user.last_name,
+            username=db_user.tg_username,
+            registration_step=registration_step,
+            current_phone=current_phone,
+            last_bot_message_id=last_bot_message_id,
+            phones=phones,
+            cards=cards,
+        )
 
 
 def update_basic_user_info(
@@ -49,16 +170,16 @@ def update_basic_user_info(
     last_name: Optional[str],
     username: Optional[str],
 ) -> None:
-    """
-    Обновить базовые данные о пользователе (имя, фамилия, username).
-    """
-    user: User = get_user(user_id)                     # Берём (или создаём) пользователя из "базы"
+    """Update basic user info (first_name, last_name, username) in MySQL."""
+    tg_user_id = int(user_id)
 
-    user.first_name = first_name                       # Обновляем имя
-    user.last_name = last_name                         # Обновляем фамилию
-    user.username = username                           # Обновляем username
+    with get_session() as session:
+        db_user = _get_or_create_db_user(session, tg_user_id)
 
-    save_user(user)                                    # Сохраняем пользователя обратно в JSON
+        db_user.first_name = first_name
+        db_user.last_name = last_name
+        db_user.tg_username = username
+        # commit is done by get_session()
 
 
 def add_or_update_phone(
@@ -68,32 +189,89 @@ def add_or_update_phone(
     main_bank: Optional[str],
 ) -> None:
     """
-    Добавить или обновить номер телефона пользователя.
+    Add or update a user's phone number.
 
-    Аргументы:
-    - user_id: ID пользователя.
-    - phone: строка с номером телефона (в "нормализованном" виде).
-    - banks: список кодов выбранных банков.
-    - main_bank: код основного банка (или None, если основной ещё не выбран).
+    Representation in user_payment_methods:
+    - method_type = 'phone';
+    - pay_method_number = phone;
+    - one row per selected bank (provider);
+    - row corresponding to main_bank has is_primary = 1, others have 0;
+    - rows for banks that are no longer selected are marked is_active = 0.
     """
-    user: User = get_user(user_id)                     # Загружаем пользователя
+    tg_user_id = int(user_id)
+    phone_str = str(phone).strip()
+    if not phone_str:
+        return
 
-    phone_str = str(phone)                             # Номер телефона приводим к строке (на всякий случай)
+    # Normalise bank list (unique, non-empty strings).
+    norm_banks: List[str] = []
+    for b in banks or []:
+        b_str = str(b).strip()
+        if b_str and b_str not in norm_banks:
+            norm_banks.append(b_str)
 
-    existing_phone_data: Optional[PhoneData] = user.phones.get(phone_str)
-    # Берём существующую запись по этому номеру, если есть
+    if main_bank is not None:
+        main_bank = str(main_bank).strip() or None
 
-    if existing_phone_data is None:                    # Если записи по этому номеру не было
-        phone_data = PhoneData()                       # Создаём новый объект PhoneData
-    else:
-        phone_data = existing_phone_data               # Иначе работаем с существующим объектом
+    if main_bank and main_bank not in norm_banks:
+        norm_banks.insert(0, main_bank)
 
-    phone_data.banks = list(banks)                     # Обновляем список банков (копия списка)
-    phone_data.main_bank = main_bank                   # Обновляем основной банк
+    with get_session() as session:
+        db_user = _get_or_create_db_user(session, tg_user_id)
 
-    user.phones[phone_str] = phone_data                # Записываем PhoneData в словарь телефонов пользователя
+        existing_pms = session.execute(
+            select(DBUserPaymentMethod).where(
+                and_(
+                    DBUserPaymentMethod.user_id == db_user.id,
+                    DBUserPaymentMethod.method_type == PaymentMethodType.phone,
+                    DBUserPaymentMethod.pay_method_number == phone_str,
+                )
+            )
+        ).scalars().all()
 
-    save_user(user)                                    # Сохраняем пользователя на диск
+        # If no banks are provided, deactivate all phone records for this number.
+        if not norm_banks:
+            for pm in existing_pms:
+                pm.is_active = False
+                pm.is_primary = False
+            return
+
+        existing_by_provider: Dict[str, DBUserPaymentMethod] = {}
+        for pm in existing_pms:
+            key = pm.provider or ""
+            existing_by_provider[key] = pm
+
+        selected_set = set(norm_banks)
+
+        # Deactivate providers that are no longer selected.
+        for pm in existing_pms:
+            prov = pm.provider or ""
+            if prov not in selected_set:
+                pm.is_active = False
+                pm.is_primary = False
+
+        # Upsert rows for each selected bank.
+        for bank_code in norm_banks:
+            prov = bank_code
+            is_primary = bool(main_bank) and (bank_code == main_bank)
+
+            pm = existing_by_provider.get(prov)
+            if pm is None:
+                pm = DBUserPaymentMethod(
+                    user_id=db_user.id,
+                    method_type=PaymentMethodType.phone,
+                    pay_method_number=phone_str,
+                    provider=prov,
+                    is_primary=is_primary,
+                    is_active=True,
+                )
+                session.add(pm)
+            else:
+                pm.provider = prov
+                pm.is_primary = is_primary
+                pm.is_active = True
+
+        invalidate_user_payment_methods_cache(tg_user_id)
 
 
 def set_registration_progress(
@@ -102,31 +280,76 @@ def set_registration_progress(
     current_phone: Optional[str],
 ) -> None:
     """
-    Сохранить прогресс регистрации пользователя:
-    - step: строка с шагом ("phone", "banks", "main_bank", "completed" и т.д.) или None;
-    - current_phone: номер телефона, с которым сейчас работаем, или None.
+    Save user's registration progress.
+
+    - step is stored in bot_last_step.last_step;
+    - current_phone is stored in bot_last_step.pay_method_number (can be phone or card);
+    - if step is None, the row is removed (progress cleared).
     """
-    user: User = get_user(user_id)                     # Берём пользователя из "базы"
+    tg_user_id = int(user_id)
 
-    user.registration_step = step                      # Обновляем шаг регистрации
-    user.current_phone = current_phone                 # Обновляем текущий номер (может быть None)
+    with get_session() as session:
+        db_user = _get_or_create_db_user(session, tg_user_id)
 
-    save_user(user)                                    # Сохраняем изменения
+        existing: Optional[BotLastStep] = session.execute(
+            select(BotLastStep).where(
+                and_(
+                    BotLastStep.user_id == db_user.id,
+                    BotLastStep.chat_id == tg_user_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if step is None:
+            if existing is not None:
+                session.delete(existing)
+            return
+
+        if existing is None:
+            existing = BotLastStep(
+                user_id=db_user.id,
+                chat_id=tg_user_id,
+                last_step=step,
+                pay_method_number=current_phone,
+            )
+            session.add(existing)
+        else:
+            existing.last_step = step
+            existing.pay_method_number = current_phone
 
 
 def get_registration_progress(user_id: int) -> Tuple[Optional[str], Optional[str]]:
     """
-    Прочитать прогресс регистрации пользователя.
+    Read user's registration progress.
 
-    Возвращает кортеж:
-    (registration_step, current_phone)
+    Returns (registration_step, pay_method_number).
+
+    pay_method_number in this context is used as current_phone/current_card
+    depending on what is being processed.
     """
-    user: User = get_user(user_id)                     # Загружаем пользователя
+    tg_user_id = int(user_id)
 
-    return user.registration_step, user.current_phone  # Возвращаем две строки (или None/None)
+    with get_session() as session:
+        db_user: Optional[DBUser] = session.execute(
+            select(DBUser).where(DBUser.tg_user_id == tg_user_id)
+        ).scalar_one_or_none()
 
+        if db_user is None:
+            return None, None
 
-# --- Банковские карты пользователя --- #
+        bot_step: Optional[BotLastStep] = session.execute(
+            select(BotLastStep).where(
+                and_(
+                    BotLastStep.user_id == db_user.id,
+                    BotLastStep.chat_id == tg_user_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if bot_step is None:
+            return None, None
+
+        return bot_step.last_step, bot_step.pay_method_number
 
 
 def add_or_update_card(
@@ -136,36 +359,50 @@ def add_or_update_card(
     payment_system: Optional[str],
 ) -> None:
     """
-    Добавить или обновить банковскую карту пользователя.
+    Add or update a user's bank card.
 
-    Аргументы:
-    - user_id: ID пользователя.
-    - card_number: номер карты (желательно уже нормализованный, без пробелов).
-    - bank: код банка (как в словаре BANKS) или None.
-    - payment_system: код платёжной системы ("visa", "mir", "mc" и т.п.) или None.
+    Representation in user_payment_methods:
+    - method_type = 'card';
+    - pay_method_number = card_number;
+    - provider = bank;
+    - card_brand = payment_system;
+    - is_active = 1.
     """
-    user: User = get_user(user_id)                     # Берём (или создаём) пользователя
-
-    card_number_str = str(card_number).strip()         # Приводим номер карты к "чистой" строке
-    if not card_number_str:                            # Если строка пустая — просто выходим, нечего сохранять
+    tg_user_id = int(user_id)
+    card_number_str = str(card_number).strip()
+    if not card_number_str:
         return
 
-    existing_card = user.cards.get(card_number_str)    # Пытаемся найти уже существующую карту по этому номеру
+    with get_session() as session:
+        db_user = _get_or_create_db_user(session, tg_user_id)
 
-    if existing_card is None:                          # Если карты ещё не было
-        card = CardData(                               # Создаём новый объект CardData
-            number=card_number_str,                    # Сохраняем номер карты
-            bank=bank,                                 # Код банка или None
-            payment_system=payment_system,             # Платёжная система или None
-        )
-    else:
-        card = existing_card                           # Если карта уже есть — обновляем её поля
-        card.bank = bank                               # Обновляем код банка
-        card.payment_system = payment_system           # Обновляем платёжную систему
+        pm: Optional[DBUserPaymentMethod] = session.execute(
+            select(DBUserPaymentMethod).where(
+                and_(
+                    DBUserPaymentMethod.user_id == db_user.id,
+                    DBUserPaymentMethod.method_type == PaymentMethodType.card,
+                    DBUserPaymentMethod.pay_method_number == card_number_str,
+                )
+            )
+        ).scalar_one_or_none()
 
-    user.cards[card_number_str] = card                 # Сохраняем/обновляем карту в словаре пользователя
+        if pm is None:
+            pm = DBUserPaymentMethod(
+                user_id=db_user.id,
+                method_type=PaymentMethodType.card,
+                pay_method_number=card_number_str,
+                provider=bank,
+                card_brand=payment_system,
+                is_primary=False,
+                is_active=True,
+            )
+            session.add(pm)
+        else:
+            pm.provider = bank
+            pm.card_brand = payment_system
+            pm.is_active = True
 
-    save_user(user)                                    # Фиксируем изменения на диске
+        invalidate_user_payment_methods_cache(tg_user_id)
 
 
 def remove_card(
@@ -173,22 +410,45 @@ def remove_card(
     card_number: str,
 ) -> None:
     """
-    Удалить банковскую карту пользователя по номеру.
+    Deactivate a user's bank card by its number.
 
-    Если карты с таким номером нет — функция ничего не делает.
+    Implemented as is_active = 0 in user_payment_methods.
     """
-    user: User = get_user(user_id)                     # Берём (или создаём) пользователя
+    tg_user_id = int(user_id)
+    card_number_str = str(card_number).strip()
+    if not card_number_str:
+        return
 
-    card_number_str = str(card_number).strip()         # Нормализуем ключ (номер карты)
-    if not card_number_str:                            # Если передали пустую строку
-        return                                         # Ничего не удаляем
+    with get_session() as session:
+        db_user: Optional[DBUser] = session.execute(
+            select(DBUser).where(DBUser.tg_user_id == tg_user_id)
+        ).scalar_one_or_none()
 
-    if card_number_str in user.cards:                  # Проверяем, есть ли такая карта
-        user.cards.pop(card_number_str, None)          # Удаляем запись из словаря
-        save_user(user)                                # Сохраняем изменения (только если реально что-то удалили)
+        if db_user is None:
+            return
+
+        pm: Optional[DBUserPaymentMethod] = session.execute(
+            select(DBUserPaymentMethod).where(
+                and_(
+                    DBUserPaymentMethod.user_id == db_user.id,
+                    DBUserPaymentMethod.method_type == PaymentMethodType.card,
+                    DBUserPaymentMethod.pay_method_number == card_number_str,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if pm is None:
+            return
+
+        pm.is_active = False
+        pm.is_primary = False
+
+        invalidate_user_payment_methods_cache(tg_user_id)
 
 
-# --- Хранение ID последнего сообщения бота по chat_id --- #
+# ============================================================
+# Storing last bot message_id per chat in DB
+# ============================================================
 
 
 def set_last_bot_message_id(
@@ -196,34 +456,113 @@ def set_last_bot_message_id(
     message_id: Optional[int],
 ) -> None:
     """
-    Сохранить ID последнего сообщения бота для конкретного чата.
+    Store the last bot message ID for a given chat.
 
-    ВАЖНО: теперь ID хранится ВНУТРИ файла пользователя (User.last_bot_message_id),
-    а не в отдельном last_messages.json.
-
-    Аргументы:
-    - chat_id: ID чата (int). В приватных чатах совпадает с user_id.
-    - message_id: ID сообщения бота (int) или None, если нужно "очистить" запись.
+    Data is stored in tg_lite_bot.chat_last_message:
+    - user_id references users.id (resolved by tg_user_id == chat_id);
+    - chat_id is the Telegram chat_id;
+    - last_message_id is stored as a string.
     """
-    user: User = get_user(chat_id)                     # Для приватных чатов chat_id == user_id, берём/создаём пользователя
+    chat_id_int = int(chat_id)
 
-    if message_id is None:                             # Если нужно "очистить" сохранённый ID
-        user.last_bot_message_id = None                # Обнуляем поле
-    else:
-        user.last_bot_message_id = int(message_id)     # Сохраняем ID последнего сообщения бота как int
+    with get_session() as session:
+        db_user = _get_or_create_db_user(session, chat_id_int)
 
-    save_user(user)                                    # Фиксируем изменения на диске
+        existing: Optional[ChatLastMessage] = session.execute(
+            select(ChatLastMessage).where(
+                and_(
+                    ChatLastMessage.user_id == db_user.id,
+                    ChatLastMessage.chat_id == chat_id_int,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if message_id is None:
+            if existing is not None:
+                session.delete(existing)
+            return
+
+        last_message_str = str(int(message_id))
+
+        if existing is None:
+            existing = ChatLastMessage(
+                user_id=db_user.id,
+                chat_id=chat_id_int,
+                last_message_id=last_message_str,
+            )
+            session.add(existing)
+        else:
+            existing.last_message_id = last_message_str
 
 
-def get_last_bot_message_id(chat_id: int) -> Optional[int]:
+# Получение списка методов получения платежей специалистом
+def list_user_payment_methods(
+    user_id: int,
+    *,
+    only_active: bool = True,
+    method_types: Iterable[PaymentMethodType] | None = None,
+) -> list[DBUserPaymentMethod]:
     """
-    Получить ID последнего сообщения бота для заданного chat_id.
+    Read user's payment methods from DB.
 
-    Если пользователя/файла нет или ID ещё не сохранялся — возвращаем None.
+    user_id here is Telegram user_id (tg_user_id).
+    Returns rows from user_payment_methods for this user.
     """
-    existing: Optional[User] = load_user(chat_id)      # Пытаемся прочитать пользователя БЕЗ авто-создания
+    tg_user_id = int(user_id)
 
-    if existing is None:                               # Если файл пользователя ещё не создавался
-        return None                                    # Считаем, что и ID последнего сообщения нет
+    with get_session() as session:  # контекстный менеджер с commit/rollback :contentReference[oaicite:1]{index=1}
+        db_user = session.execute(
+            select(DBUser).where(DBUser.tg_user_id == tg_user_id)
+        ).scalar_one_or_none()
 
-    return existing.last_bot_message_id                # Возвращаем сохранённый ID (или None)
+        if db_user is None:
+            return []
+
+        stmt = select(DBUserPaymentMethod).where(DBUserPaymentMethod.user_id == db_user.id)
+
+        if only_active:
+            stmt = stmt.where(DBUserPaymentMethod.is_active.is_(True))
+
+        if method_types:
+            stmt = stmt.where(DBUserPaymentMethod.method_type.in_(list(method_types)))
+
+        # Удобная сортировка: тип, primary, банк, номер
+        stmt = stmt.order_by(
+            DBUserPaymentMethod.method_type,
+            DBUserPaymentMethod.is_primary.desc(),
+            DBUserPaymentMethod.provider,
+            DBUserPaymentMethod.pay_method_number,
+        )
+
+        return session.execute(stmt).scalars().all()
+
+
+_PM_CACHE: dict[tuple[int, bool, tuple[str, ...]], tuple[float, list[DBUserPaymentMethod]]] = {}
+_PM_CACHE_TTL_SEC = 120.0
+
+
+def invalidate_user_payment_methods_cache(user_id: int) -> None:
+    tg_user_id = int(user_id)
+    for k in list(_PM_CACHE.keys()):
+        if k[0] == tg_user_id:
+            _PM_CACHE.pop(k, None)
+
+
+def list_user_payment_methods_cached(
+    user_id: int,
+    *,
+    only_active: bool = True,
+    method_types: Iterable[PaymentMethodType] | None = None,
+) -> list[DBUserPaymentMethod]:
+    tg_user_id = int(user_id)
+    mt_key = tuple(sorted([(mt.value if isinstance(mt, PaymentMethodType) else str(mt)) for mt in (method_types or [])]))
+    key = (tg_user_id, only_active, mt_key)
+
+    now = time.monotonic()
+    cached = _PM_CACHE.get(key)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    data = list_user_payment_methods(user_id, only_active=only_active, method_types=method_types)
+    _PM_CACHE[key] = (now + _PM_CACHE_TTL_SEC, data)
+    return data
