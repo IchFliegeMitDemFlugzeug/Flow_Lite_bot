@@ -110,10 +110,10 @@ def _format_recipient_identifier(option: InlinePaymentOption) -> str:
     # Если тип реквизита — телефон
     if option.payment_type == "phone":
         # Формируем строку с подсказкой, что это номер телефона
-        return f"*\n📱Номер телефона:*\n    `{option.identifier}`"
+        return f"*\n▪ Номер телефона:*\n    `{option.identifier}`"
 
     # Иначе считаем, что это карта (payment_type == "card")
-    return f"*\nНомер карты:*\n    `{option.identifier}`"
+    return f"*\n▪ Номер карты:*\n    `{option.identifier}`"
 
 
 def _format_recipient_name() -> str:
@@ -172,7 +172,7 @@ def build_transfer_message_text(
     # --------------------------------------
     # Определяем и форматируем название банка получателя
     bank_title_or_hint: str = _format_recipient_bank(option, parsed_query)
-    bank_line: str = f"*\n🏦 Банк получателя:*\n  {bank_title_or_hint}"
+    bank_line: str = f"*\n▪ Банк получателя:*\n  {bank_title_or_hint}"
 
     # --------------------------------------
     # 4. ФИО получателя
