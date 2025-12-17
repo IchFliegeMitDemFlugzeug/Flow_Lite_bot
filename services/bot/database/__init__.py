@@ -40,15 +40,27 @@ import time
 
 from threading import RLock
 
+from datetime import datetime
+
+
 
 # ============================================================
 # Helpers
 # ============================================================
 
 
-def _get_or_create_db_user(session: Session, tg_user_id: int) -> DBUser:
+def _get_or_create_db_user(
+    session: Session,
+    tg_user_id: int,
+    *,
+    mark_authorised: bool = False,
+) -> DBUser:
     """
     Find user by Telegram user_id in 'users' table or create a new row.
+
+    If mark_authorised=True:
+    - on create: sets authorised_at
+    - on existing row: sets authorised_at only if it is NULL
     """
     tg_user_id = int(tg_user_id)
 
@@ -58,10 +70,17 @@ def _get_or_create_db_user(session: Session, tg_user_id: int) -> DBUser:
 
     if db_user is None:
         db_user = DBUser(tg_user_id=tg_user_id)
+        if mark_authorised:
+            db_user.authorised_at = datetime.utcnow()
         session.add(db_user)
         session.flush()  # ensure db_user.id is populated
+        return db_user
+
+    if mark_authorised and db_user.authorised_at is None:
+        db_user.authorised_at = datetime.utcnow()
 
     return db_user
+
 
 
 # ============================================================
@@ -172,7 +191,7 @@ def get_user(user_id: int) -> User:
         # ----- DBUser core (cached) -----
         core = _user_core_cache_get(tg_user_id)
         if core is None:
-            db_user = _get_or_create_db_user(session, tg_user_id)
+            db_user = _get_or_create_db_user(session, tg_user_id, mark_authorised=True)
             core = _UserCore(
                 db_user_id=int(db_user.id),
                 first_name=db_user.first_name,
@@ -279,6 +298,31 @@ def get_user(user_id: int) -> User:
             phones=phones,
             cards=cards,
         )
+
+
+# Добавление клиентов в таблицу users (нажали на кнопку в inline-сообщении)
+def ensure_inline_user(
+    user_id: int,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    username: Optional[str] = None,
+) -> None:
+    """
+    Create user row if missing for a user who clicked an inline button in a private chat.
+    Does NOT set authorised_at.
+    """
+    tg_user_id = int(user_id)
+
+    with get_session() as session:
+        db_user = _get_or_create_db_user(session, tg_user_id, mark_authorised=False)
+        if db_user.first_name is None:
+            # обновляем базовые поля только если переданы (не затираем None)
+            if first_name is not None:
+                db_user.first_name = first_name
+            if last_name is not None:
+                db_user.last_name = last_name
+            if username is not None:
+                db_user.tg_username = username
 
 
 def update_basic_user_info(
