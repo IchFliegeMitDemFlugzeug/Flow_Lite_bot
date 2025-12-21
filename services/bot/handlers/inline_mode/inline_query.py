@@ -27,7 +27,6 @@ import os  # os нужен, чтобы читать секрет из перем
 import logging  # logging нужен, чтобы писать предупреждения/диагностику, если match не найден
 
 from dataclasses import asdict  # asdict нужен, чтобы превращать dataclass в dict перед json.dumps
-from datetime import datetime, timezone  # datetime/timezone — чтобы добавить UTC-время создания токена
 from typing import List, Optional  # List — тип списка, Optional — тип "может быть None"
 
 from aiogram import Router  # Router — отдельный роутер для inline-логики
@@ -87,7 +86,8 @@ def _compute_transfer_id(  # Функция кодирует полный пак
     Что кладём внутрь пакета:
     - creator_tg_user_id — кто отправил инлайн-сообщение;
     - raw_query/parsed/option — что именно было в сообщении (банк, сумма, реквизит);
-    - generated_at — UTC-время формирования кнопки (приблизительное время отправки).
+    - без timestamp — специально убрали, чтобы transfer_id всегда совпадал между inline_query
+      (список) и chosen_inline_result (выбор).
 
     Почему так:
     - WebApp теперь сам получает все исходные данные через startapp-параметр,
@@ -100,7 +100,8 @@ def _compute_transfer_id(  # Функция кодирует полный пак
         "raw_query": raw_query,  # Исходный текст запроса
         "parsed": asdict(parsed_query),  # Распарсенная структура запроса
         "option": asdict(option),  # Детали выбранного реквизита
-        "generated_at": datetime.now(timezone.utc).isoformat(),  # Время генерации токена в UTC
+        # СОВСЕМ ВАЖНО: timestamp убрали, чтобы transfer_id был строго детерминированным
+        # и совпадал между этапами inline_query (показ списка) и chosen_inline_result (выбор).
     }  # Конец словаря
 
     secret: str = os.getenv("INLINE_TRANSFER_SECRET", "dev-change-me")  # Секрет для подписи
