@@ -17,79 +17,31 @@
             id: 'sber', // Идентификатор банка
             title: 'Сбербанк', // Название банка
             logo: 'assets/img/banks/sber.png', // Путь к логотипу
-            deeplink: 'https://www.sberbank.com/sms/pbpn?requisiteNumber=79309791051', // Deep link или ссылка
-            fallback_url: 'https://www.sberbank.com/sms/pbpn?requisiteNumber=79309791051' // Веб-версия
-          },
-          {
-            id: 'alfabank', // Идентификатор банка
-            title: 'Альфа-Банк', // Название
-            logo: 'assets/img/banks/alfabank.png', // Логотип
-            deeplink: 'alfabank://account', // Deep link
-            fallback_url: 'https://web.alfabank.ru/dashboard' // Веб-страница
+            deeplink: 'https://www.sberbank.com/sms/pbpn?requisiteNumber=79309791051', // Ссылка оплаты по номеру телефона
+            fallback_url: 'https://www.sberbank.com/sms/pbpn?requisiteNumber=79309791051' // Рабочий fallback в браузере
           },
           {
             id: 'tbank', // Идентификатор банка
             title: 'Т-Банк', // Название
             logo: 'assets/img/banks/tbank.png', // Логотип
-            deeplink: 'tbank://main', // Deep link
-            fallback_url: 'https://www.tbank.ru/mybank/' // Веб-страница
-          },
-          {
-            id: 'rshb', // Идентификатор банка
-            title: 'Россельхозбанк', // Название
-            logo: 'assets/img/banks/rshb.png', // Логотип
-            deeplink: 'rshbmbfl://', // Deep link
-            fallback_url: 'https://online.rshb.ru/cas-auth/index?forceAuth=true' // Веб-страница
-          },
-          {
-            id: 'gazprombank', // Идентификатор банка
-            title: 'Газпромбанк', // Название
-            logo: 'assets/img/banks/gazprombank.png', // Логотип
-            deeplink: 'gpbapp://', // Deep link
-            fallback_url: 'https://ib.online.gpb.ru/' // Веб-страница
-          },
-          {
-            id: 'psb', // Идентификатор банка
-            title: 'ПСБ', // Название
-            logo: 'assets/img/banks/psb.png', // Логотип
-            deeplink: 'psbmobile://auth/accounts', // Deep link
-            fallback_url: 'https://ib.psbank.ru/settings' // Веб-страница
-          },
-          {
-            id: 'mkb', // Идентификатор банка
-            title: 'МКБ', // Название
-            logo: 'assets/img/banks/mkb.png', // Логотип
-            deeplink: 'mkb2://deeplink', // Deep link
-            fallback_url: 'https://online.mkb.ru/login' // Веб-страница
+            deeplink: 'https://www.tbank.ru/mybank/payments/persons/phone/?internal_source=homePayments_transferByPhoneSmall_suggest&predefined=%7B%22phone%22%3A%22%2B79160794459%22%7D', // Переход на оплату по телефону
+            fallback_url: 'https://www.tbank.ru/mybank/payments/persons/phone/?internal_source=homePayments_transferByPhoneSmall_suggest&predefined=%7B%22phone%22%3A%22%2B79160794459%22%7D' // Fallback совпадает с deeplink
           },
           {
             id: 'vtb', // Идентификатор банка
             title: 'ВТБ', // Название
             logo: 'assets/img/banks/vtb.png', // Логотип
-            deeplink: 'vtb://vtb.ru/i/', // Deep link
-            fallback_url: 'https://online.vtb.ru/login' // Веб-страница
+            deeplink: 'https://online.vtb.ru/i/cell/ppl/9309791051', // Deeplink на оплату по телефону
+            fallback_url: 'https://online.vtb.ru/transfers/transferByPhone?isStandaloneScenario=true&actionType=generalTargetSearch&tab=SWITCH_TO_OP_4808&isForeingNumber=false&isInternalTargetSearch=false&predefinedValues%5BpredefinedPhoneNumber%5D=%2B7%20916%20079-44-59&stage=INPUT' // Безопасный fallback для браузера
           },
-          {
-            id: 'mtsbank', // Идентификатор банка
-            title: 'МТС Банк', // Название
-            logo: 'assets/img/banks/mtsbank.png', // Логотип
-            deeplink: 'mtsmoney://', // Deep link
-            fallback_url: 'https://sso.mtsbank.ru/login/mtsmoney/auth/' // Веб-страница
-          },
-          {
-            id: 'pochtabank', // Идентификатор банка
-            title: 'Почта Банк', // Название
-            logo: 'assets/img/banks/pochtabank.png', // Логотип
-            deeplink: 'bank100000000016://sbpay', // Deep link
-            fallback_url: 'https://my.pochtabank.ru/login' // Веб-страница
-          },
-          {
-            id: 'sovcombank', // Идентификатор банка
-            title: 'Совкомбанк', // Название
-            logo: 'assets/img/banks/sovcombank.png', // Логотип
-            deeplink: 'ompshared://', // Deep link
-            fallback_url: 'https://bk.sovcombank.ru/ru/html/login.html' // Веб-страница
-          }
+          { id: 'alfabank', title: 'Альфа-Банк', logo: 'assets/img/banks/alfabank.png', close_only: true }, // Остальные пока только закрывают Mini App
+          { id: 'rshb', title: 'Россельхозбанк', logo: 'assets/img/banks/rshb.png', close_only: true }, // Заглушка закрытия
+          { id: 'gazprombank', title: 'Газпромбанк', logo: 'assets/img/banks/gazprombank.png', close_only: true }, // Заглушка закрытия
+          { id: 'psb', title: 'ПСБ', logo: 'assets/img/banks/psb.png', close_only: true }, // Заглушка закрытия
+          { id: 'mkb', title: 'МКБ', logo: 'assets/img/banks/mkb.png', close_only: true }, // Заглушка закрытия
+          { id: 'mtsbank', title: 'МТС Банк', logo: 'assets/img/banks/mtsbank.png', close_only: true }, // Заглушка закрытия
+          { id: 'pochtabank', title: 'Почта Банк', logo: 'assets/img/banks/pochtabank.png', close_only: true }, // Заглушка закрытия
+          { id: 'sovcombank', title: 'Совкомбанк', logo: 'assets/img/banks/sovcombank.png', close_only: true } // Заглушка закрытия
         ];
       });
   }

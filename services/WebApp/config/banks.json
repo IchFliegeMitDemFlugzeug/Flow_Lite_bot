@@ -3,24 +3,24 @@
     "id": "sber",
     "title": "Сбербанк",
     "logo": "assets/img/banks/sber.png",
-    "supported_identifiers": ["phone"],
-    "builder": "sber_phone",
-    "notes": "Перевод по номеру телефона через Сбербанк"
+    "supported_identifiers": ["phone", "card"],
+    "builder": "sber_universal",
+    "notes": "Перевод по номеру телефона или карты через Сбербанк"
   },
   {
     "id": "tbank",
     "title": "Т-Банк",
     "logo": "assets/img/banks/tbank.png",
-    "supported_identifiers": ["card"],
-    "builder": "tinkoff_card",
-    "notes": "Перевод по номеру карты в Т-Банк"
+    "supported_identifiers": ["phone"],
+    "builder": "tinkoff_phone",
+    "notes": "Оплата по номеру телефона в Т-Банк"
   },
   {
     "id": "vtb",
     "title": "ВТБ",
     "logo": "assets/img/banks/vtb.png",
     "supported_identifiers": ["phone", "card"],
-    "builder": "vtb_generic",
+    "builder": "vtb_universal",
     "notes": "Универсальные ссылки для перевода в ВТБ"
   }
 ]

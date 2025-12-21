@@ -5,26 +5,25 @@ from __future__ import annotations  # Включаем отложенные ан
 from services.WebApp.schemas.link_payload import LinkBuilderRequest, LinkBuilderResult  # Импортируем схемы запросов и ответов
 
 
-def build_vtb_generic(payload: LinkBuilderRequest) -> LinkBuilderResult:
-    """Формирует ссылки ВТБ для телефона или карты."""
+def build_vtb_universal(payload: LinkBuilderRequest) -> LinkBuilderResult:
+    """Формирует deeplink и безопасный fallback для ВТБ."""
 
-    identifier_type = payload.get("identifier_type", "")  # Узнаём тип реквизита
+    identifier_type = payload.get("identifier_type", "")  # Узнаём тип реквизита (phone/card)
     identifier_value = payload.get("identifier_value", "")  # Получаем значение реквизита
     digits_only = "".join(ch for ch in identifier_value if ch.isdigit())  # Очищаем строку от лишних символов
 
-    if identifier_type == "card":  # Если передана карта
-        deeplink = f"vtb://transfer/card/{digits_only}"  # Deep link для перевода по карте
-        fallback_url = f"https://online.vtb.ru/payments/card2card?cardNumber={digits_only}"  # Веб-страница для перевода по карте
-    else:  # Если тип не карта, считаем, что это телефон
-        normalized_phone = digits_only if digits_only.startswith("7") else "7" + digits_only  # Приводим номер к виду 7XXXXXXXXXXX
-        deeplink = f"vtb://p2p/{normalized_phone}"  # Deep link для перевода по телефону
-        fallback_url = f"https://online.vtb.ru/payments/p2p?phone={normalized_phone}"  # Веб-страница для перевода по телефону
+    normalized_digits = digits_only  # Сохраняем очищенные цифры для вставки в ссылку
+    deeplink = f"https://online.vtb.ru/i/cell/ppl/{normalized_digits}"  # Используем рабочий deeplink-шаблон ВТБ
 
-    link_id = f"vtb:{identifier_type}:{digits_only}"  # Уникальный идентификатор ссылки для логов
+    fallback_url = (
+        "https://online.vtb.ru/transfers/transferByPhone?isStandaloneScenario=true"
+        "&actionType=generalTargetSearch&tab=SWITCH_TO_OP_4808&isForeingNumber=false"
+        "&isInternalTargetSearch=false&predefinedValues%5BpredefinedPhoneNumber%5D=%2B7%20916%20079-44-59&stage=INPUT"
+    )  # Мягкий fallback, не дающий ошибку в браузерах
+    link_id = f"vtb:{identifier_type}:{normalized_digits}"  # Уникальный идентификатор ссылки для логов
 
     return {
-        "deeplink": deeplink,  # Deep link в приложение ВТБ
-        "fallback_url": fallback_url,  # Запасная ссылка в браузере
+        "deeplink": deeplink,  # Deep link для открытия приложения ВТБ
+        "fallback_url": fallback_url,  # Перенаправление в веб при проблемах с deep link
         "link_id": link_id,  # Идентификатор ссылки для телеметрии
     }
-
