@@ -1,4 +1,19 @@
 services
+├── WebApp
+│   ├── LOGO.png
+│   ├── LOGO_ALFABANK.png
+│   ├── LOGO_GAZPROMBANK.png
+│   ├── LOGO_MKB.png
+│   ├── LOGO_MTSBANK.png
+│   ├── LOGO_POCHTABANK.png
+│   ├── LOGO_PSB.png
+│   ├── LOGO_RSHB.png
+│   ├── LOGO_SBER.png
+│   ├── LOGO_SOVKOMBANK.png
+│   ├── LOGO_TBANK.png
+│   ├── LOGO_VTB.png
+│   ├── background.png
+│   └── index.html
 ├── bot
 │   ├── database
 │   │   ├── users
@@ -25,17 +40,6 @@ services
 │   ├── headlines
 │   │   ├── inline_mode
 │   │   │   ├── Inline_preview.py
-│   │   │   ├── LOGO_ALFABANK.jpg
-│   │   │   ├── LOGO_GAZPROMBANK.jpg
-│   │   │   ├── LOGO_MKB.jpg
-│   │   │   ├── LOGO_MTSBANK.jpg
-│   │   │   ├── LOGO_POCHTABANK.jpg
-│   │   │   ├── LOGO_PSB.jpg
-│   │   │   ├── LOGO_RSHB.jpg
-│   │   │   ├── LOGO_SBER.jpg
-│   │   │   ├── LOGO_SOVKOMBANK.jpg
-│   │   │   ├── LOGO_TBANK.jpg
-│   │   │   ├── LOGO_VTB.jpg
 │   │   │   └── __init__.py
 │   │   ├── __init__.py
 │   │   ├── add_headline.py
@@ -81,6 +85,7 @@ services
 │   ├── tools
 │   │   ├── inline_mode
 │   │   │   ├── __init__.py
+│   │   │   ├── bank_logos.py
 │   │   │   └── query_parser.py
 │   │   ├── __init__.py
 │   │   ├── banks_wordbook.py
