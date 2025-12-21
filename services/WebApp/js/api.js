@@ -1,10 +1,18 @@
 (function (window) { // Изолируем клиент API в IIFE
-  const API_BASE_URL = 'https://YOUR_DOMAIN_HERE/api/webapp'; // Заглушка с базовым URL для отправки событий
+  const API_BASE_URL = 'http://localhost:8080/api/webapp'; // Локальный эндпоинт backend.py для приёма событий
 
   function buildPayload(context, eventType, bankId, page, extra) { // Собираем единый объект полезной нагрузки
     const safeContext = context || {}; // Гарантируем наличие объекта контекста
+    const transferPayload = safeContext.transferPayload || {}; // Достаём раскодированный пакет из transfer_id
+    const inlinePayload = transferPayload.payload || {}; // Внутренние данные о переводе
+
     const basePayload = { // Структура, общая для всех событий
       transfer_id: safeContext.startParam || (safeContext.initDataUnsafe ? safeContext.initDataUnsafe.start_param : '') || '', // Идентификатор операции/передачи
+      transfer_payload: transferPayload, // Полный пакет, который пришёл через start_param
+      inline_creator_tg_user_id: inlinePayload.creator_tg_user_id || null, // Кто отправил инлайн-сообщение
+      inline_generated_at: inlinePayload.generated_at || '', // Когда сообщение сформировано
+      inline_parsed: inlinePayload.parsed || {}, // Распарсенные данные запроса (банк, сумма)
+      inline_option: inlinePayload.option || {}, // Конкретный выбранный реквизит
       event_type: eventType, // Имя события, например webapp_open
       ts: new Date().toISOString(), // Метка времени в ISO-формате
       initData: safeContext.initData || '', // Полная строка initData из Telegram
