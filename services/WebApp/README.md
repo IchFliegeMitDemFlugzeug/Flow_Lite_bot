@@ -7,11 +7,20 @@
 - `css/app.css` — стили интерфейса и анимаций.
 - `js/telegram.js` — работа с Telegram WebApp API.
 - `js/api.js` — отправка событий на backend (заглушка URL по умолчанию).
-- `js/banks.js` — загрузка списка банков из `config/banks.json` с запасным вариантом.
+- `js/banks.js` — устаревшая загрузка списка банков из `config/banks.json` (после перехода на API не используется напрямую).
 - `js/app.js` — основная логика отрисовки и навигации.
-- `config/banks.json` — конфигурация банков (deeplink + fallback ссылки).
+- `config/banks.json` — конфигурация банков (визуальные данные и имя конструктора ссылки).
 - `assets/` — фон и логотипы.
 - `redirect/` — страница редиректа, которая пытается открыть приложение банка и делает мягкий fallback.
+
+## Новый поток получения ссылок
+1. Mini App получает `transfer_id` из `start_param` и запрашивает `GET /api/links?transfer_id=...`.
+2. Бэкенд определяет тип реквизита (телефон/карта), выбирает конструкторы из `services/WebApp/link_builders` и собирает deeplink + fallback.
+3. В ответе фронтенд получает массив `{ bank_id, title, logo, link_id, link_token, deeplink, fallback_url }` и рисует кнопки.
+4. При клике Mini App открывает `redirect/index.html?transfer_id=...&bank_id=...&link_token=...` (deeplink/fallback можно пробросить в параметрах для подстраховки).
+5. Страница редиректа при наличии `link_token` делает запрос `GET /api/links/{token}`, берёт deeplink/fallback и пытается открыть приложение банка с откатом на веб.
+
+Сами конструкторы лежат в `services/WebApp/link_builders`, а общие типы — в `services/WebApp/schemas/link_payload.py`.
 
 ## Как проверить
 1. Откройте `services/WebApp/index.html` локально или через GitHub Pages.
