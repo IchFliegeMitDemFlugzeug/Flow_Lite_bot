@@ -15,12 +15,17 @@
 
     window.ApiClient.fetchBankLinks(transferId) // Запрашиваем готовые ссылки у backend
       .then(function (links) { // После успешной загрузки
+        if (!links || !links.length) { // Если список пустой, включаем резервную загрузку
+          return renderFromFallback(bankListElement, telegramContext); // Переключаемся на запасные банки
+        }
         renderBanks(links, bankListElement, telegramContext); // Рисуем кнопки банков
         attachStretchEffect(bankListElement, '.btn'); // Добавляем эффект "растяжки" при прокрутке
         preloadAssetsAndAnimate(links); // Предзагружаем ассеты и запускаем анимации
+        return null; // Возвращаем null, чтобы цепочка промисов считала работу завершённой
       })
       .catch(function (error) { // Если что-то пошло не так
         console.debug('App: не удалось отрисовать банки', error); // Сообщаем об ошибке в debug
+        renderFromFallback(bankListElement, telegramContext); // Пытаемся отрисовать запасной список
       });
   });
 
@@ -41,7 +46,16 @@
       title.textContent = bank.title; // Записываем название банка
 
       button.addEventListener('click', function () { // Реагируем на клик по конкретному банку
+        const hasRedirect = Boolean(bank.link_token || bank.deeplink || bank.fallback_url); // Проверяем, есть ли данные для редиректа
+        const shouldCloseOnly = bank.close_only || !hasRedirect; // Определяем, нужно ли просто закрыть Mini App
+
         window.ApiClient.sendBankClick(telegramContext, bank.bank_id || bank.id, { link_id: bank.link_id, link_token: bank.link_token }); // Отправляем событие выбора банка
+
+        if (shouldCloseOnly) { // Если нужно просто закрыть приложение
+          window.TelegramBridge.closeMiniApp(); // Закрываем Mini App без перехода
+          return; // Завершаем обработчик
+        }
+
         openRedirect(bank, telegramContext); // Перенаправляем пользователя на страницу редиректа
       });
 
@@ -52,6 +66,18 @@
       const delay = index * 0.05; // Высчитываем задержку анимации для ступенчатого появления
       button.style.animation = 'slideUp 0.6s ease-out both ' + delay + 's'; // Назначаем CSS-анимацию кнопке
     });
+  }
+
+  function renderFromFallback(container, telegramContext) { // Рисуем кнопки из запасного списка
+    window.BankLoader.loadBanks() // Загружаем банки напрямую из локальной конфигурации
+      .then(function (banks) { // После загрузки файла
+        renderBanks(banks, container, telegramContext); // Рисуем кнопки
+        attachStretchEffect(container, '.btn'); // Подключаем эффект растяжки
+        preloadAssetsAndAnimate(banks); // Предзагружаем картинки и запускаем анимацию
+      })
+      .catch(function (error) { // Если даже fallback не сработал
+        console.debug('App: fallback списка банков не доступен', error); // Сообщаем об ошибке в debug
+      });
   }
 
   function openRedirect(bank, telegramContext) { // Формируем ссылку на страницу редиректа и открываем её

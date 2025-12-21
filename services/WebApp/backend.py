@@ -157,7 +157,25 @@ def build_links_for_transfer(transfer_id: str) -> Tuple[List[dict], List[str]]: 
 
     for bank in banks:  # Перебираем все банки из конфигурации
         bank_id = bank.get("id") or "unknown"  # Забираем id банка
+        close_only = bool(bank.get("close_only"))  # Узнаём, нужно ли только закрывать Mini App без ссылок
         supported = bank.get("supported_identifiers") or []  # Узнаём поддерживаемые типы реквизитов
+
+        if close_only:  # Если банк пока работает как заглушка
+            results.append(  # Сразу добавляем его в итоговый список
+                {
+                    "bank_id": bank_id,  # Возвращаем id банка
+                    "title": bank.get("title", "Банк"),  # Название для кнопки
+                    "logo": bank.get("logo", ""),  # Путь к логотипу
+                    "notes": bank.get("notes", ""),  # Дополнительное описание
+                    "close_only": True,  # Флаг для фронта, что нужно просто закрыть Mini App
+                    "link_id": bank.get("id", bank_id),  # Устанавливаем link_id для логирования
+                    "link_token": "",  # Токен пустой, так как редирект не нужен
+                    "deeplink": "",  # Deeplink отсутствует
+                    "fallback_url": "",  # Fallback тоже отсутствует
+                }
+            )
+            continue  # Переходим к следующему банку
+
         if identifier_type not in supported:  # Если данный банк не умеет обрабатывать тип реквизита
             continue  # Пропускаем банк
 

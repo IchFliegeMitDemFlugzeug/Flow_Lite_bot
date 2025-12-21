@@ -1,8 +1,9 @@
 """Строитель deeplink-ссылок для Сбербанка.
 
-Здесь мы собираем SMS/P2P-ссылку на перевод по номеру телефона. Формат
-ссылки взят из публичного шаблона Сбербанка и может использоваться как
-deep link и как fallback в браузере.
+На основе переданного идентификатора собираем рабочую ссылку формата
+`https://www.sberbank.com/sms/pbpn?requisiteNumber=<значение>`, которая
+подходит и для номера телефона, и для номера карты. Fallback совпадает
+с deeplink, поэтому пользователь всегда откроет корректную страницу.
 """
 
 from __future__ import annotations  # Включаем отложенные аннотации для читаемости
@@ -10,20 +11,19 @@ from __future__ import annotations  # Включаем отложенные ан
 from services.WebApp.schemas.link_payload import LinkBuilderRequest, LinkBuilderResult  # Импортируем типы запросов и ответов
 
 
-def build_sber_phone(payload: LinkBuilderRequest) -> LinkBuilderResult:
-    """Собирает ссылку на перевод по телефону в Сбербанк."""
+def build_sber_universal(payload: LinkBuilderRequest) -> LinkBuilderResult:
+    """Собирает ссылку для Сбера по телефону или карте."""
 
-    raw_phone = payload.get("identifier_value", "")  # Забираем исходный телефон из запроса
-    digits_only = "".join(ch for ch in raw_phone if ch.isdigit() or ch == "+")  # Оставляем только цифры и плюс
-    normalized_phone = digits_only if digits_only.startswith("+") else "+" + digits_only  # Приводим номер к формату +7...
+    raw_value = payload.get("identifier_value", "")  # Берём исходное значение реквизита
+    digits_only = "".join(ch for ch in raw_value if ch.isdigit())  # Оставляем только цифры
+    normalized_value = digits_only  # Сохраняем очищенное значение как единый формат для ссылки
 
-    deeplink = f"https://www.sberbank.com/sms/pbpn?requisiteNumber={normalized_phone}"  # Шаблон для SMS/DeepLink
-    fallback_url = deeplink  # Для Сбера ссылка fallback совпадает с deeplink
-    link_id = f"sber:{normalized_phone}"  # Уникальный идентификатор ссылки для логов
+    deeplink = f"https://www.sberbank.com/sms/pbpn?requisiteNumber={normalized_value}"  # Формируем ссылку с параметром requisiteNumber
+    fallback_url = deeplink  # Fallback совпадает с deeplink и работает в браузере
+    link_id = f"sber:{payload.get('identifier_type', 'unknown')}:{normalized_value}"  # Уникальный идентификатор для телеметрии
 
     return {
-        "deeplink": deeplink,  # Deep link для открытия приложения Сбера
-        "fallback_url": fallback_url,  # Веб-страница для перехода, если приложение не открылось
-        "link_id": link_id,  # Идентификатор ссылки для телеметрии
+        "deeplink": deeplink,  # Deep link/веб-ссылка Сбера
+        "fallback_url": fallback_url,  # Запасной URL при проблемах с deep link
+        "link_id": link_id,  # Идентификатор ссылки для логов
     }
-
