@@ -1,49 +1,46 @@
-# Название workflow (чисто для отображения во вкладке Actions)
-name: Deploy WebApp (services/WebApp) to GitHub Pages
+name: Размещение статического сайта на GitHub Pages
 
-# Когда запускать workflow
 on:
-  # Запуск при пуше в основную ветку
+  # Запускаем процесс публикации при каждом пуше в основную ветку work.
   push:
-    # Указываем ветки, изменения в которых должны триггерить деплой
-    branches:
-      - main # Если у тебя основная ветка называется иначе (например master) — поменяй здесь
+    branches: ["work"]
+  # Добавляем ручной запуск из интерфейса Actions.
+  workflow_dispatch:
 
-  # Возможность запустить деплой вручную из вкладки Actions
-  workflow_dispatch: {} # Пустой объект означает "без параметров"
-
-# Права, которые нужны для деплоя GitHub Pages
+# Указываем минимально необходимые права для работы с GitHub Pages.
 permissions:
-  contents: read      # Разрешаем читать содержимое репозитория (чтобы забрать файлы сайта)
-  pages: write        # Разрешаем публиковать сайт в GitHub Pages
-  id-token: write     # Нужен GitHub для безопасной выдачи токена деплоя (OIDC)
+  contents: read # Нужно, чтобы считывать файлы репозитория.
+  pages: write   # Нужно, чтобы размещать артефакт на GitHub Pages.
+  id-token: write # Нужно для аутентификации при деплое страниц.
 
-# Чтобы два деплоя не шли параллельно и не мешали друг другу
+# Исключаем одновременные публикации, чтобы деплой был последовательным.
 concurrency:
-  group: "pages"      # Все деплои Pages попадают в одну группу
-  cancel-in-progress: true # Если уже идёт деплой и прилетел новый — старый отменяется
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
   deploy:
-    # Запускаем job на виртуальной машине Ubuntu (стандартно для GitHub Actions)
+    # Используем последнюю версию Ubuntu на хосте GitHub Actions.
     runs-on: ubuntu-latest
+    # Описываем окружение GitHub Pages и ссылку, которую вернёт deploy-pages.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      # Шаг 1: скачиваем репозиторий в runner (иначе файлов просто не будет)
+      # Шаг 1. Забираем содержимое репозитория.
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Шаг 2: настраиваем окружение GitHub Pages (официальный шаг GitHub)
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      # Шаг 3: упаковываем в "артефакт" именно папку services/WebApp
-      - name: Upload Pages artifact (services/WebApp)
+      # Шаг 2. Собираем в артефакт папку с готовым статическим сайтом.
+      # Здесь в качестве корня сайта используется директория services/WebApp,
+      # в которой уже лежит index.html и связанные файлы.
+      - name: Upload static site artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: services/WebApp # ВАЖНО: это корень твоего сайта, где лежит index.html
+          path: services/WebApp
 
-      # Шаг 4: публикуем загруженный артефакт в GitHub Pages
+      # Шаг 3. Размещаем загруженный артефакт на GitHub Pages.
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

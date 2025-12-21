@@ -20,13 +20,14 @@
 from __future__ import annotations  # Разрешаем отложенные аннотации типов (удобно для type hints)
 
 import base64  # base64 нужен, чтобы красиво кодировать байты хэша в URL-safe строку
-import hashlib  # hashlib нужен для SHA-256 (как криптопримитив внутри HMAC)
-import hmac  # hmac нужен, чтобы делать детерминированный "подписанный" хэш от параметров
+import hmac  # hmac нужен для подписи пакета, чтобы WebApp мог проверить целостность
+import hashlib  # hashlib нужен для алгоритма SHA-256 при подписи
 import json  # json нужен, чтобы сериализовать контекст операции в строку и сохранить в БД
 import os  # os нужен, чтобы читать секрет из переменных окружения (не хардкодить)
 import logging  # logging нужен, чтобы писать предупреждения/диагностику, если match не найден
 
 from dataclasses import asdict  # asdict нужен, чтобы превращать dataclass в dict перед json.dumps
+from datetime import datetime, timezone  # datetime/timezone — чтобы добавить UTC-время создания токена
 from typing import List, Optional  # List — тип списка, Optional — тип "может быть None"
 
 from aiogram import Router  # Router — отдельный роутер для inline-логики
@@ -37,10 +38,7 @@ from aiogram.types import (  # Импортируем нужные типы из
     ChosenInlineResult,  # ChosenInlineResult — апдейт, когда юзер реально выбрал вариант и отправил его в чат
 )
 
-from bot.database import (  # Публичные функции БД, которые разрешено вызывать из хэндлеров
-    get_user,  # Получение доменной модели пользователя из БД
-    inline_mode_upsert_webapp_session,  # Запись transfer_id + контекста (и позже — opener_* из backend WebApp)
-)
+from bot.database import get_user  # Получение доменной модели пользователя из БД
 
 from bot.tools.inline_mode.query_parser import (  # Парсер текста inline-запроса
     parse_inline_query,  # Функция парсинга
@@ -76,74 +74,55 @@ inline_mode_router: Router = Router(  # Создаём роутер, в кото
 logger = logging.getLogger(__name__)  # Создаём логгер для этого модуля (чтобы писать предупреждения)
 
 
-def _serialize_context_for_db(  # Функция сериализует контекст операции в JSON-строку (для сохранения в БД)
-    *,  # Делаем параметры только именованными, чтобы не перепутать порядок
-    option: InlinePaymentOption,  # Выбранный вариант (телефон/карта/сценарий)
-    parsed: ParsedInlineQuery,  # Распарсенный запрос (сумма/банк/кандидат)
-    raw_query: str,  # Сырой текст inline-запроса
-) -> str:  # Возвращаем строку JSON
-    """  # Докстринг функции — пояснение, что и зачем мы делаем
-    Сериализуем контекст операции в JSON-строку для записи в БД.
-
-    Почему JSON:
-    - удобно хранить как TEXT/JSON в MySQL;
-    - удобно дебажить;
-    - можно расширять без миграций структуры поля.
-    """  # Конец докстринга
-
-    payload: dict = {  # Собираем единый словарь контекста
-        "raw_query": raw_query,  # Оригинальный текст, который пользователь ввёл после @бот
-        "parsed": asdict(parsed),  # ParsedInlineQuery (dataclass) превращаем в dict
-        "option": asdict(option),  # InlinePaymentOption (dataclass) превращаем в dict
-    }  # Закрываем словарь
-
-    return json.dumps(payload, ensure_ascii=False)  # Делаем JSON строку без экранирования кириллицы
-
-
-def _compute_transfer_id(  # Функция детерминированно вычисляет transfer_id для конкретного option
+def _compute_transfer_id(  # Функция кодирует полный пакет данных для WebApp внутрь transfer_id
     *,  # Только именованные аргументы — меньше шансов перепутать входные данные
     creator_user_id: int,  # TG id пользователя, который выбирает вариант (он же "создатель" inline-сообщения)
     raw_query: str,  # Сырой inline-запрос (влияет на итоговый набор вариантов)
     option: InlinePaymentOption,  # Конкретный вариант реквизитов
+    parsed_query: ParsedInlineQuery,  # Уже распарсенный inline-запрос (экономим на повторном парсинге)
 ) -> str:  # Возвращаем URL-safe токен
     """  # Докстринг функции
-    Детерминированно строим transfer_id, чтобы мы могли:
-    - показать результат с id=transfer_id в inline_query,
-    - потом поймать chosen_inline_result.result_id и восстановить, какой option был выбран,
-      НЕ сохраняя ничего в БД на этапе ввода @.
+    Формируем transfer_id как base64-строку с JSON-пакетом.
 
-    Реализация:
-    - используем HMAC-SHA256 по "секрету" (чтобы токены нельзя было подбирать/коллизии были крайне маловероятны),
-    - берём первые 16 байт результата (достаточно для компактного токена),
-    - кодируем в base64 urlsafe без '='.
+    Что кладём внутрь пакета:
+    - creator_tg_user_id — кто отправил инлайн-сообщение;
+    - raw_query/parsed/option — что именно было в сообщении (банк, сумма, реквизит);
+    - generated_at — UTC-время формирования кнопки (приблизительное время отправки).
 
-    ВАЖНО:
-    - секрет нужно задать в переменной окружения INLINE_TRANSFER_SECRET,
-      иначе в dev будет использован дефолт (и на проде так оставлять нельзя).
+    Почему так:
+    - WebApp теперь сам получает все исходные данные через startapp-параметр,
+      без предварительной записи в БД на стороне бота.
+    - Данные подписываем секретом HMAC и кладём рядом, чтобы WebApp мог проверить целостность.
     """  # Конец докстринга
 
-    secret: str = os.getenv("INLINE_TRANSFER_SECRET", "dev-change-me")  # Берём секрет из env (или dev-дефолт)
+    payload = {  # Собираем словарь с данными для WebApp
+        "creator_tg_user_id": int(creator_user_id),  # Кто сформировал сообщение
+        "raw_query": raw_query,  # Исходный текст запроса
+        "parsed": asdict(parsed_query),  # Распарсенная структура запроса
+        "option": asdict(option),  # Детали выбранного реквизита
+        "generated_at": datetime.now(timezone.utc).isoformat(),  # Время генерации токена в UTC
+    }  # Конец словаря
 
-    # Собираем "сообщение" для HMAC: ровно те поля, которые идентифицируют конкретный вариант.  # Комментарий-пояснение
-    msg: str = (  # Формируем одну строку, чтобы стабильно хэшировалось
-        f"{creator_user_id}|"  # Включаем id пользователя (чтобы разные юзеры не пересекались)
-        f"{raw_query}|"  # Включаем текст запроса (чтобы разные запросы давали разные токены)
-        f"{option.payment_type}|"  # Включаем тип (телефон/карта и т.д.)
-        f"{option.identifier}|"  # Включаем сам идентификатор (номер телефона/карта)
-        f"{option.bank_code or ''}"  # Включаем код банка (или пустую строку)
-    )  # Конец формирования строки
+    secret: str = os.getenv("INLINE_TRANSFER_SECRET", "dev-change-me")  # Секрет для подписи
 
-    digest: bytes = hmac.new(  # Строим HMAC
-        key=secret.encode("utf-8"),  # Секрет в байтах
-        msg=msg.encode("utf-8"),  # Сообщение в байтах
-        digestmod=hashlib.sha256,  # Алгоритм хэширования SHA-256
-    ).digest()  # Получаем "сырые" байты хэша
+    signature_bytes = hmac.new(  # Строим HMAC для проверки целостности
+        key=secret.encode("utf-8"),  # Ключ подписи
+        msg=json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),  # Детерминированный JSON
+        digestmod=hashlib.sha256,  # SHA-256 как алгоритм
+    ).digest()  # Получаем байты подписи
 
-    short_digest: bytes = digest[:16]  # Берём первые 16 байт — это компактно и достаточно надёжно
+    short_signature = base64.urlsafe_b64encode(signature_bytes[:12]).decode("ascii").rstrip("=")  # Компактная подпись
 
-    token: str = base64.urlsafe_b64encode(short_digest).decode("ascii").rstrip("=")  # Кодируем в URL-safe base64 и убираем '='
+    transfer_package = {  # Финальный объект, который положим в startapp
+        "payload": payload,  # Исходные данные о переводе
+        "sig": short_signature,  # Подпись для быстрой проверки
+    }  # Конец объекта
 
-    return token  # Возвращаем итоговый transfer_id (короткий, URL-safe, воспроизводимый)
+    encoded: str = base64.urlsafe_b64encode(  # Кодируем в URL-safe base64
+        json.dumps(transfer_package, ensure_ascii=False).encode("utf-8")  # Сериализуем объект в байты
+    ).decode("ascii").rstrip("=")  # Превращаем в строку и убираем '=' для компактности
+
+    return encoded  # Возвращаем готовый transfer_id
 
 
 def _make_inline_article(  # Функция делает один элемент "зелёного списка"
@@ -168,6 +147,7 @@ def _make_inline_article(  # Функция делает один элемент
         creator_user_id=creator_user_id,  # Передаём TG id пользователя
         raw_query=raw_query,  # Передаём исходный текст запроса
         option=option,  # Передаём вариант (телефон/карта и т.д.)
+        parsed_query=parsed,  # Передаём распарсенный запрос (чтобы не парсить повторно)
     )  # Получаем transfer_id
 
     message_text: str = build_transfer_message_text(  # Собираем текст сообщения, которое улетит в чат
@@ -339,6 +319,7 @@ async def handle_chosen_inline_result(chosen: ChosenInlineResult) -> None:  # А
             creator_user_id=chosen.from_user.id,  # id пользователя (создателя)
             raw_query=raw_query,  # исходный запрос
             option=option,  # текущий вариант
+            parsed_query=parsed,  # Передаём распарсенный запрос
         )  # Получаем детерминированный токен
 
         if transfer_id == result_id:  # Сравниваем с тем, что реально выбрали
@@ -354,22 +335,10 @@ async def handle_chosen_inline_result(chosen: ChosenInlineResult) -> None:  # А
         )  # Конец логирования
         return  # Выходим — ничего не пишем в БД
 
-    context_json: str = _serialize_context_for_db(  # Сериализуем контекст для БД
-        option=matched_option,  # Тот вариант, который реально выбрали
-        parsed=parsed,  # Распарсенный запрос
-        raw_query=raw_query,  # Сырой запрос
-    )  # Получаем JSON строку
-
     logger.warning(  # warning — чтобы точно печаталось
         "INLINE MODE: chosen_inline_result. user_id=%s result_id=%s query=%r matched_option=%r",
         chosen.from_user.id,
         result_id,
         raw_query,
         asdict(matched_option),
-    )
-
-    inline_mode_upsert_webapp_session(  # Пишем в БД (мягко — у тебя функция уже обёрнута try/except)
-        transfer_id=result_id,  # transfer_id — это выбранный result_id
-        creator_tg_user_id=chosen.from_user.id,  # Кто отправил inline-сообщение (создатель операции)
-        context_json=context_json,  # Контекст операции (что выбрали/что ввели)
-    )  # opener_* сюда не передаём — их заполнит backend WebApp при открытии страницы
+    )  # Контекст теперь уходит внутри transfer_id в WebApp и там дополняется перед записью
