@@ -57,6 +57,15 @@ class ApiLinkTests(unittest.TestCase):  # Набор тестов для API с�
         self.assertIn('deeplink', payload)  # В ответе должен быть deeplink
         self.assertIn('fallback_url', payload)  # В ответе должен быть fallback_url
 
+    def test_close_only_banks_present(self):  # Проверяем, что заглушечные банки тоже приходят
+        status, data = self._get('/api/links?transfer_id=79998887766')  # Запрашиваем ссылки по телефону
+        self.assertEqual(status, 200)  # Ожидаем успешный ответ
+        ids = {item['bank_id'] for item in data['links']}  # Собираем множество всех id банков
+        self.assertIn('alfabank', ids)  # Альфа-Банк должен присутствовать как заглушка
+        close_only_bank = next(item for item in data['links'] if item['bank_id'] == 'alfabank')  # Достаём объект банка
+        self.assertTrue(close_only_bank.get('close_only'))  # Убеждаемся, что проставлен флаг close_only
+        self.assertFalse(close_only_bank.get('link_token'))  # Токен у заглушки должен быть пустым
+
 
 if __name__ == '__main__':  # Запуск тестов напрямую
     unittest.main()  # Выполняем тесты
