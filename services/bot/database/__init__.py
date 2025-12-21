@@ -397,6 +397,9 @@ def add_or_update_phone(
             for pm in existing_pms:
                 pm.is_active = False
                 pm.is_primary = False
+            # Даже если банки убрали, очищаем кеши, чтобы личный кабинет сразу увидел пустой список
+            invalidate_payment_methods_cache(db_user.id)
+            invalidate_user_payment_methods_cache(tg_user_id)
             return
 
         existing_by_provider: Dict[str, DBUserPaymentMethod] = {}
@@ -434,6 +437,9 @@ def add_or_update_phone(
                 pm.is_primary = is_primary
                 pm.is_active = True
 
+        # Чистим оба кеша реквизитов: по внутреннему ID пользователя и по его Telegram ID,
+        # чтобы после выбора банков в регистрации личный кабинет и инлайн-ответы сразу видели изменения
+        invalidate_payment_methods_cache(db_user.id)
         invalidate_user_payment_methods_cache(tg_user_id)
 
 
@@ -565,6 +571,9 @@ def add_or_update_card(
             pm.card_brand = payment_system
             pm.is_active = True
 
+        # Обновили данные по карте — очищаем кеши реквизитов по обоим ключам (db_user.id и tg_user_id),
+        # чтобы get_user и личный кабинет использовали свежий снимок платежных методов
+        invalidate_payment_methods_cache(db_user.id)
         invalidate_user_payment_methods_cache(tg_user_id)
 
 
@@ -606,6 +615,8 @@ def remove_card(
         pm.is_active = False
         pm.is_primary = False
 
+        # Карту деактивировали — очищаем кеши _PM_CACHE (по db_user.id) и _USER_PAYMENT_METHODS_CACHE (по tg_user_id)
+        invalidate_payment_methods_cache(db_user.id)
         invalidate_user_payment_methods_cache(tg_user_id)
 
 
@@ -651,7 +662,10 @@ def remove_phone(
             pm.is_active = False
             pm.is_primary = False
     
-        invalidate_payment_methods_cache(tg_user_id)
+        # Телефон деактивировали — сбрасываем кеш по внутреннему ID и по Telegram ID,
+        # чтобы ЛК и инлайн-запросы не показывали старые данные
+        invalidate_payment_methods_cache(db_user.id)
+        invalidate_user_payment_methods_cache(tg_user_id)
 
 
 # ============================================================
@@ -779,15 +793,17 @@ def list_user_payment_methods(
         return session.execute(stmt).scalars().all()
 
 
-_PM_CACHE: dict[tuple[int, bool, tuple[str, ...]], tuple[float, list[DBUserPaymentMethod]]] = {}
-_PM_CACHE_TTL_SEC = 120.0
+# Отдельное кеш-хранилище для list_user_payment_methods_cached, чтобы не конфликтовать с _PM_CACHE выше.
+_USER_PAYMENT_METHODS_CACHE: dict[tuple[int, bool, tuple[str, ...]], tuple[float, list[DBUserPaymentMethod]]] = {}
+# Время жизни кеша для пользовательских платежных методов (в секундах).
+_USER_PAYMENT_METHODS_CACHE_TTL_SEC = 120.0
 
 
 def invalidate_user_payment_methods_cache(user_id: int) -> None:
     tg_user_id = int(user_id)
-    for k in list(_PM_CACHE.keys()):
+    for k in list(_USER_PAYMENT_METHODS_CACHE.keys()):
         if k[0] == tg_user_id:
-            _PM_CACHE.pop(k, None)
+            _USER_PAYMENT_METHODS_CACHE.pop(k, None)
 
 
 def list_user_payment_methods_cached(
@@ -801,12 +817,12 @@ def list_user_payment_methods_cached(
     key = (tg_user_id, only_active, mt_key)
 
     now = time.monotonic()
-    cached = _PM_CACHE.get(key)
+    cached = _USER_PAYMENT_METHODS_CACHE.get(key)
     if cached and cached[0] > now:
         return cached[1]
 
     data = list_user_payment_methods(user_id, only_active=only_active, method_types=method_types)
-    _PM_CACHE[key] = (now + _PM_CACHE_TTL_SEC, data)
+    _USER_PAYMENT_METHODS_CACHE[key] = (now + _USER_PAYMENT_METHODS_CACHE_TTL_SEC, data)
     return data
 
 
