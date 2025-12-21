@@ -1,0 +1,46 @@
+name: Размещение статического сайта на GitHub Pages
+
+on:
+  # Запускаем процесс публикации при каждом пуше в основную ветку work.
+  push:
+    branches: ["work"]
+  # Добавляем ручной запуск из интерфейса Actions.
+  workflow_dispatch:
+
+# Указываем минимально необходимые права для работы с GitHub Pages.
+permissions:
+  contents: read # Нужно, чтобы считывать файлы репозитория.
+  pages: write   # Нужно, чтобы размещать артефакт на GitHub Pages.
+  id-token: write # Нужно для аутентификации при деплое страниц.
+
+# Исключаем одновременные публикации, чтобы деплой был последовательным.
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # Используем последнюю версию Ubuntu на хосте GitHub Actions.
+    runs-on: ubuntu-latest
+    # Описываем окружение GitHub Pages и ссылку, которую вернёт deploy-pages.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      # Шаг 1. Забираем содержимое репозитория.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Шаг 2. Собираем в артефакт папку с готовым статическим сайтом.
+      # Здесь в качестве корня сайта используется директория services/WebApp,
+      # в которой уже лежит index.html и связанные файлы.
+      - name: Upload static site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: services/WebApp
+
+      # Шаг 3. Размещаем загруженный артефакт на GitHub Pages.
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
