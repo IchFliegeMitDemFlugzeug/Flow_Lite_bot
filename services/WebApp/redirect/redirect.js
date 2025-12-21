@@ -5,35 +5,35 @@
     const query = new URLSearchParams(window.location.search); // Парсим параметры строки запроса
     const transferId = query.get('transfer_id') || ''; // Забираем transfer_id из адресной строки
     const bankId = query.get('bank_id') || ''; // Забираем id выбранного банка
+    const linkToken = query.get('link_token') || ''; // Токен ссылки, выданный backend
+    const deeplinkParam = query.get('deeplink') || ''; // Подстраховочный deeplink из query
+    const fallbackParam = query.get('fallback_url') || ''; // Подстраховочный fallback из query
     const telegramContext = window.TelegramBridge.getTelegramContext(); // Собираем контекст Telegram или браузера
     telegramContext.startParam = telegramContext.startParam || transferId; // Прокидываем transfer_id из параметров, если он есть
 
-    window.ApiClient.sendRedirectEvent(telegramContext, bankId, 'redirect_open'); // Логируем открытие страницы редиректа
+    window.ApiClient.sendRedirectEvent(telegramContext, bankId, 'redirect_open', 'redirect', { link_token: linkToken }); // Логируем открытие страницы редиректа
 
-    window.BankLoader.loadBanks() // Загружаем список банков
-      .then(function (banks) { // После получения данных
-        const targetBank = banks.find(function (bank) { // Ищем банк по переданному id
-          return bank.id === bankId; // Возвращаем совпадение по id
-        }) || banks[0] || { // Если ничего не нашли или список пустой
-          id: bankId || 'unknown', // Используем переданный id или unknown
-          title: 'Ваш банк', // Название по умолчанию
-          deeplink: '', // Deep link отсутствует
-          fallback_url: 'https://www.google.com' // Безопасный fallback
-        }; // Завершили выбор банка
-
+    resolveLink(linkToken, deeplinkParam, fallbackParam) // Определяем deeplink/fallback
+      .then(function (bankLink) { // Когда получили итоговую ссылку
+        const targetBank = { // Собираем объект для UI
+          id: bankId || bankLink.bank_id || 'unknown', // Идентификатор банка
+          title: 'Ваш банк', // Нейтральное название
+          deeplink: bankLink.deeplink || '', // Итоговый deeplink
+          fallback_url: bankLink.fallback_url || '' // Итоговый fallback
+        }; // Заканчиваем объект банка
         updateUi(targetBank); // Обновляем текст на странице
-        tryOpenBank(targetBank); // Пробуем открыть приложение банка
+        tryOpenBank(targetBank, linkToken); // Пробуем открыть приложение банка
       })
-      .catch(function (error) { // Если не удалось получить список
-        console.debug('Redirect: ошибка загрузки банков', error); // Пишем в debug
-        const fallbackBank = { // Готовим запасной объект банка
-          id: bankId || 'unknown', // Используем переданный id или unknown
-          title: 'Ваш банк', // Отображаем нейтральное название
-          deeplink: '', // Deep link отсутствует
-          fallback_url: 'https://www.google.com' // Безопасный fallback на внешнюю ссылку
-        }; // Конец запасного банка
-        updateUi(fallbackBank); // Показываем сообщение пользователю
-        tryOpenBank(fallbackBank); // Запускаем логику перехода
+      .catch(function (error) { // Если не удалось добыть ссылку
+        console.debug('Redirect: не удалось получить ссылку', error); // Пишем в debug
+        const fallbackBank = { // Подготовка безопасного fallback
+          id: bankId || 'unknown', // Идентификатор
+          title: 'Ваш банк', // Название по умолчанию
+          deeplink: '', // Нет deeplink
+          fallback_url: fallbackParam || 'https://www.google.com' // Используем переданный fallback или нейтральную ссылку
+        }; // Завершили объект fallback
+        updateUi(fallbackBank); // Показываем fallback
+        tryOpenBank(fallbackBank, linkToken); // Запускаем переход
       });
 
     function updateUi(bank) { // Обновляем текстовые элементы страницы
@@ -44,8 +44,8 @@
       });
     }
 
-    function tryOpenBank(bank) { // Пытаемся открыть банковское приложение
-      window.ApiClient.sendRedirectEvent(telegramContext, bank.id, 'redirect_attempt'); // Логируем попытку открытия
+    function tryOpenBank(bank, token) { // Пытаемся открыть банковское приложение
+      window.ApiClient.sendRedirectEvent(telegramContext, bank.id, 'redirect_attempt', 'redirect', { link_token: token }); // Логируем попытку открытия
 
       if (!bank.deeplink) { // Если deep link отсутствует
         return switchToFallback(bank); // Сразу уходим на fallback
@@ -72,6 +72,13 @@
       if (bank.fallback_url) { // Если fallback указан
         window.location.href = bank.fallback_url; // Выполняем переход на веб-страницу
       }
+    }
+
+    function resolveLink(token, deeplink, fallback) { // Получаем финальные ссылки для редиректа
+      if (token) { // Если есть токен
+        return window.ApiClient.fetchLinkByToken(token); // Запрашиваем ссылки у backend
+      }
+      return Promise.resolve({ deeplink: deeplink || '', fallback_url: fallback || '' }); // Используем параметры из URL
     }
   });
 })(window, document); // Передаём window и document внутрь IIFE
