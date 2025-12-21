@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <!-- Кодировка и адаптивность -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Заголовок вкладки -->
+  <title>Редирект в банк</title>
+  <!-- Общие стили приложения -->
+  <link rel="stylesheet" href="../css/app.css">
+  <!-- Дополнительные стили страницы редиректа -->
+  <link rel="stylesheet" href="./redirect.css">
+  <!-- Подключаем Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Общие модули -->
+  <script defer src="../js/telegram.js"></script>
+  <script defer src="../js/api.js"></script>
+  <script defer src="../js/banks.js"></script>
+  <script defer src="./redirect.js"></script>
+</head>
+<body>
+  <!-- Контейнер для текста редиректа -->
+  <div class="redirect-page">
+    <h1 class="redirect-title">Открываем банк…</h1>
+    <p id="status-text" class="redirect-text">Готовим переход, пожалуйста, подождите</p>
+    <p class="redirect-hint">Если ничего не произошло, <a id="fallback-link" class="redirect-link" href="#">нажмите сюда</a>.</p>
+  </div>
+</body>
+</html>
