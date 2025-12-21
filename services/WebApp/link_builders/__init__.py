@@ -10,16 +10,16 @@ from __future__ import annotations  # Разрешаем отложенные а
 
 from typing import Callable, Dict  # Импортируем типы для реестра
 
-from .sber import build_sber_phone  # Строитель ссылок для Сбера по телефону
-from .tinkoff import build_tinkoff_card  # Строитель ссылок для Т-Банка по карте
-from .vtb import build_vtb_generic  # Универсальный строитель ссылок для ВТБ
+from .sber import build_sber_universal  # Строитель ссылок для Сбера по телефону или карте
+from .tinkoff import build_tinkoff_phone  # Строитель ссылок для Т-Банка по телефону
+from .vtb import build_vtb_universal  # Универсальный строитель ссылок для ВТБ
 from services.WebApp.schemas.link_payload import LinkBuilderRequest, LinkBuilderResult  # Общие схемы запросов и ответов
 
 # Реестр доступных конструкторов по идентификатору из banks.json
 BUILDER_REGISTRY: Dict[str, Callable[[LinkBuilderRequest], LinkBuilderResult]] = {
-    "sber_phone": build_sber_phone,  # Сбербанк: перевод по номеру телефона
-    "tinkoff_card": build_tinkoff_card,  # Т-Банк: перевод по номеру карты
-    "vtb_generic": build_vtb_generic,  # ВТБ: универсальные ссылки для телефона или карты
+    "sber_universal": build_sber_universal,  # Сбербанк: перевод по телефону или карте
+    "tinkoff_phone": build_tinkoff_phone,  # Т-Банк: перевод по номеру телефона
+    "vtb_universal": build_vtb_universal,  # ВТБ: универсальные ссылки для телефона или карты
 }
 
 
