@@ -3,88 +3,24 @@
     "id": "sber",
     "title": "Сбербанк",
     "logo": "assets/img/banks/sber.png",
-    "deeplink": "https://www.sberbank.com/sms/pbpn?requisiteNumber=79309791051",
-    "fallback_url": "https://www.sberbank.com/sms/pbpn?requisiteNumber=79309791051",
-    "extra": { "note": "Данные взяты из исходного HTML" }
-  },
-  {
-    "id": "alfabank",
-    "title": "Альфа-Банк",
-    "logo": "assets/img/banks/alfabank.png",
-    "deeplink": "alfabank://account",
-    "fallback_url": "https://web.alfabank.ru/dashboard",
-    "extra": { "note": "Данные взяты из исходного HTML" }
+    "supported_identifiers": ["phone"],
+    "builder": "sber_phone",
+    "notes": "Перевод по номеру телефона через Сбербанк"
   },
   {
     "id": "tbank",
     "title": "Т-Банк",
     "logo": "assets/img/banks/tbank.png",
-    "deeplink": "tbank://main",
-    "fallback_url": "https://www.tbank.ru/mybank/",
-    "extra": { "note": "Данные взяты из исходного HTML" }
-  },
-  {
-    "id": "rshb",
-    "title": "Россельхозбанк",
-    "logo": "assets/img/banks/rshb.png",
-    "deeplink": "rshbmbfl://",
-    "fallback_url": "https://online.rshb.ru/cas-auth/index?forceAuth=true",
-    "extra": { "note": "Данные взяты из исходного HTML" }
-  },
-  {
-    "id": "gazprombank",
-    "title": "Газпромбанк",
-    "logo": "assets/img/banks/gazprombank.png",
-    "deeplink": "gpbapp://",
-    "fallback_url": "https://ib.online.gpb.ru/",
-    "extra": { "note": "Данные взяты из исходного HTML" }
-  },
-  {
-    "id": "psb",
-    "title": "ПСБ",
-    "logo": "assets/img/banks/psb.png",
-    "deeplink": "psbmobile://auth/accounts",
-    "fallback_url": "https://ib.psbank.ru/settings",
-    "extra": { "note": "Данные взяты из исходного HTML" }
-  },
-  {
-    "id": "mkb",
-    "title": "МКБ",
-    "logo": "assets/img/banks/mkb.png",
-    "deeplink": "mkb2://deeplink",
-    "fallback_url": "https://online.mkb.ru/login",
-    "extra": { "note": "Данные взяты из исходного HTML" }
+    "supported_identifiers": ["card"],
+    "builder": "tinkoff_card",
+    "notes": "Перевод по номеру карты в Т-Банк"
   },
   {
     "id": "vtb",
     "title": "ВТБ",
     "logo": "assets/img/banks/vtb.png",
-    "deeplink": "vtb://vtb.ru/i/",
-    "fallback_url": "https://online.vtb.ru/login",
-    "extra": { "note": "Данные взяты из исходного HTML" }
-  },
-  {
-    "id": "mtsbank",
-    "title": "МТС Банк",
-    "logo": "assets/img/banks/mtsbank.png",
-    "deeplink": "mtsmoney://",
-    "fallback_url": "https://sso.mtsbank.ru/login/mtsmoney/auth/",
-    "extra": { "note": "Данные взяты из исходного HTML" }
-  },
-  {
-    "id": "pochtabank",
-    "title": "Почта Банк",
-    "logo": "assets/img/banks/pochtabank.png",
-    "deeplink": "bank100000000016://sbpay",
-    "fallback_url": "https://my.pochtabank.ru/login",
-    "extra": { "note": "Данные взяты из исходного HTML" }
-  },
-  {
-    "id": "sovcombank",
-    "title": "Совкомбанк",
-    "logo": "assets/img/banks/sovcombank.png",
-    "deeplink": "ompshared://",
-    "fallback_url": "https://bk.sovcombank.ru/ru/html/login.html",
-    "extra": { "note": "Данные взяты из исходного HTML" }
+    "supported_identifiers": ["phone", "card"],
+    "builder": "vtb_generic",
+    "notes": "Универсальные ссылки для перевода в ВТБ"
   }
 ]
