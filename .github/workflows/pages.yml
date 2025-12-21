@@ -1,0 +1,57 @@
+# Имя workflow, чтобы в интерфейсе GitHub Actions было ясно, что он публикует статику
+name: "Deploy WebApp to GitHub Pages"
+
+# Настройка событий, которые запускают публикацию
+on:
+  # Автозапуск при пуше в основную ветку
+  push:
+    # Список веток, где реагируем на пуш
+    branches: ["main"]
+  # Возможность вручную запустить рабочий процесс из интерфейса
+  workflow_dispatch:
+
+# Запрашиваем права, необходимые GitHub Pages
+permissions:
+  # Разрешаем читать репозиторий, чтобы забрать файлы
+  contents: read
+  # Разрешаем публиковать артефакт на GitHub Pages
+  pages: write
+  # Разрешаем выдачу OpenID токена для деплоя
+  id-token: write
+
+# Не допускаем одновременных запусков публикации
+concurrency:
+  # Идентификатор группы параллельности
+  group: "pages"
+  # При новом запуске отменяем предыдущий незавершённый
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Выбираем образ для сборки и упаковки сайта
+    runs-on: ubuntu-latest
+    steps:
+      # Шаг: подтягиваем репозиторий в рабочую среду
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      # Шаг: упаковываем статические файлы из services/WebApp в артефакт
+      - name: Upload static site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Указываем корень сайта, где уже лежат index.html и redirect.html
+          path: services/WebApp
+
+  deploy:
+    # Публиковаться можно только после упаковки артефакта
+    needs: build
+    # Выбираем тот же образ для шага деплоя
+    runs-on: ubuntu-latest
+    # Привязываем окружение GitHub Pages, чтобы видеть итоговый URL
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Шаг: разворачиваем артефакт на GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
