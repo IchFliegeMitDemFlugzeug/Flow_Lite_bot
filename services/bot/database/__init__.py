@@ -779,15 +779,17 @@ def list_user_payment_methods(
         return session.execute(stmt).scalars().all()
 
 
-_PM_CACHE: dict[tuple[int, bool, tuple[str, ...]], tuple[float, list[DBUserPaymentMethod]]] = {}
-_PM_CACHE_TTL_SEC = 120.0
+# Отдельное кеш-хранилище для list_user_payment_methods_cached, чтобы не конфликтовать с _PM_CACHE выше.
+_USER_PAYMENT_METHODS_CACHE: dict[tuple[int, bool, tuple[str, ...]], tuple[float, list[DBUserPaymentMethod]]] = {}
+# Время жизни кеша для пользовательских платежных методов (в секундах).
+_USER_PAYMENT_METHODS_CACHE_TTL_SEC = 120.0
 
 
 def invalidate_user_payment_methods_cache(user_id: int) -> None:
     tg_user_id = int(user_id)
-    for k in list(_PM_CACHE.keys()):
+    for k in list(_USER_PAYMENT_METHODS_CACHE.keys()):
         if k[0] == tg_user_id:
-            _PM_CACHE.pop(k, None)
+            _USER_PAYMENT_METHODS_CACHE.pop(k, None)
 
 
 def list_user_payment_methods_cached(
@@ -801,12 +803,12 @@ def list_user_payment_methods_cached(
     key = (tg_user_id, only_active, mt_key)
 
     now = time.monotonic()
-    cached = _PM_CACHE.get(key)
+    cached = _USER_PAYMENT_METHODS_CACHE.get(key)
     if cached and cached[0] > now:
         return cached[1]
 
     data = list_user_payment_methods(user_id, only_active=only_active, method_types=method_types)
-    _PM_CACHE[key] = (now + _PM_CACHE_TTL_SEC, data)
+    _USER_PAYMENT_METHODS_CACHE[key] = (now + _USER_PAYMENT_METHODS_CACHE_TTL_SEC, data)
     return data
 
 
