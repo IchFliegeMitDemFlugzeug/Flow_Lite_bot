@@ -11,11 +11,13 @@
       window.TelegramBridge.closeMiniApp(); // Корректно закрываем Mini App или возвращаемся назад
     });
 
-    window.BankLoader.loadBanks() // Загружаем список банков из конфигурации
-      .then(function (banks) { // После успешной загрузки
-        renderBanks(banks, bankListElement, telegramContext); // Рисуем кнопки банков
+    const transferId = telegramContext.startParam || (telegramContext.initDataUnsafe ? telegramContext.initDataUnsafe.start_param : ''); // Забираем transfer_id для запроса ссылок
+
+    window.ApiClient.fetchBankLinks(transferId) // Запрашиваем готовые ссылки у backend
+      .then(function (links) { // После успешной загрузки
+        renderBanks(links, bankListElement, telegramContext); // Рисуем кнопки банков
         attachStretchEffect(bankListElement, '.btn'); // Добавляем эффект "растяжки" при прокрутке
-        preloadAssetsAndAnimate(banks); // Предзагружаем ассеты и запускаем анимации
+        preloadAssetsAndAnimate(links); // Предзагружаем ассеты и запускаем анимации
       })
       .catch(function (error) { // Если что-то пошло не так
         console.debug('App: не удалось отрисовать банки', error); // Сообщаем об ошибке в debug
@@ -28,7 +30,7 @@
       const button = document.createElement('button'); // Создаём элемент кнопки
       button.className = 'btn'; // Назначаем класс стилизации
       button.setAttribute('type', 'button'); // Указываем тип кнопки
-      button.dataset.bankId = bank.id; // Сохраняем id банка в data-атрибуте
+      button.dataset.bankId = bank.bank_id || bank.id || ''; // Сохраняем id банка в data-атрибуте
 
       const icon = document.createElement('img'); // Создаём картинку логотипа
       icon.src = bank.logo; // Устанавливаем путь к логотипу
@@ -39,7 +41,7 @@
       title.textContent = bank.title; // Записываем название банка
 
       button.addEventListener('click', function () { // Реагируем на клик по конкретному банку
-        window.ApiClient.sendBankClick(telegramContext, bank.id); // Отправляем событие выбора банка
+        window.ApiClient.sendBankClick(telegramContext, bank.bank_id || bank.id, { link_id: bank.link_id, link_token: bank.link_token }); // Отправляем событие выбора банка
         openRedirect(bank, telegramContext); // Перенаправляем пользователя на страницу редиректа
       });
 
@@ -56,7 +58,16 @@
     const transferId = telegramContext.startParam || (telegramContext.initDataUnsafe ? telegramContext.initDataUnsafe.start_param : ''); // Достаём transfer_id
     const redirectUrl = new URL('./redirect/index.html', window.location.href); // Создаём URL страницы редиректа
     redirectUrl.searchParams.set('transfer_id', transferId || ''); // Пробрасываем transfer_id как параметр
-    redirectUrl.searchParams.set('bank_id', bank.id); // Передаём выбранный банк
+    redirectUrl.searchParams.set('bank_id', bank.bank_id || bank.id || ''); // Передаём выбранный банк
+    if (bank.link_token) { // Если backend выдал токен
+      redirectUrl.searchParams.set('link_token', bank.link_token); // Добавляем токен ссылки
+    }
+    if (bank.deeplink) { // Если есть готовый deeplink
+      redirectUrl.searchParams.set('deeplink', bank.deeplink); // Подстраховываем deeplink в URL
+    }
+    if (bank.fallback_url) { // Если указан fallback
+      redirectUrl.searchParams.set('fallback_url', bank.fallback_url); // Добавляем fallback
+    }
 
     const fullUrl = redirectUrl.toString(); // Получаем итоговую строку URL
 
