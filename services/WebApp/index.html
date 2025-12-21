@@ -3,32 +3,33 @@
 <head>
   <!-- Кодировка страницы -->
   <meta charset="UTF-8">
-  <!-- Мобильная вёрстка по ширине экрана -->
+  <!-- Мобильная адаптация под ширину устройства -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- Заголовок вкладки -->
-  <title>Выберите Ваш банк для оплаты</title>
-  <!-- Подключаем вынесенные стили -->
-  <link rel="stylesheet" href="./styles/main.css">
-  <!-- API Telegram Mini Apps -->
+  <!-- Заголовок окна браузера -->
+  <title>Выберите банк для оплаты</title>
+  <!-- Подключаем вынесенный CSS -->
+  <link rel="stylesheet" href="./css/app.css">
+  <!-- Скрипт Telegram для Mini App -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Клиентские модули, подключаем по порядку -->
+  <script defer src="./js/telegram.js"></script>
+  <script defer src="./js/api.js"></script>
+  <script defer src="./js/banks.js"></script>
+  <script defer src="./js/app.js"></script>
 </head>
 <body>
-  <!-- Шапка: кнопка возврата + логотип -->
-  <div class="header">
-    <button class="back-btn" type="button">← Вернуться</button>
-    <img src="./assets/images/LOGO.png" alt="Логотип" class="main-logo">
+  <!-- Общий контейнер страницы, чтобы центрировать контент -->
+  <div class="page">
+    <!-- Шапка: кнопка возврата и логотип -->
+    <header class="header">
+      <button class="back-btn" type="button">← Вернуться</button>
+      <img class="main-logo" src="./assets/img/logo.png" alt="Логотип сервиса">
+    </header>
+
+    <!-- Основная зона с прокручиваемым списком банков -->
+    <main class="content">
+      <div class="bank-list" aria-live="polite"></div>
+    </main>
   </div>
-
-  <!-- Контейнер для списка банков (скролл внутри) -->
-  <div class="bank-list"></div>
-
-  <!-- Подключаем конфигурацию и модули логики -->
-  <script src="./scripts/modules/constants.js"></script>
-  <script src="./scripts/modules/events.js"></script>
-  <script src="./scripts/modules/navigation.js"></script>
-  <script src="./scripts/modules/preload.js"></script>
-  <script src="./scripts/modules/animations.js"></script>
-  <!-- Основной инициализирующий скрипт -->
-  <script src="./scripts/main.js"></script>
 </body>
 </html>
