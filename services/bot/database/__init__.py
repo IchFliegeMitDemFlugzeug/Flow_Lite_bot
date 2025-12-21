@@ -397,6 +397,9 @@ def add_or_update_phone(
             for pm in existing_pms:
                 pm.is_active = False
                 pm.is_primary = False
+            # Даже если банки убрали, очищаем кеши, чтобы личный кабинет сразу увидел пустой список
+            invalidate_payment_methods_cache(db_user.id)
+            invalidate_user_payment_methods_cache(tg_user_id)
             return
 
         existing_by_provider: Dict[str, DBUserPaymentMethod] = {}
@@ -434,6 +437,9 @@ def add_or_update_phone(
                 pm.is_primary = is_primary
                 pm.is_active = True
 
+        # Чистим оба кеша реквизитов: по внутреннему ID пользователя и по его Telegram ID,
+        # чтобы после выбора банков в регистрации личный кабинет и инлайн-ответы сразу видели изменения
+        invalidate_payment_methods_cache(db_user.id)
         invalidate_user_payment_methods_cache(tg_user_id)
 
 
@@ -565,6 +571,9 @@ def add_or_update_card(
             pm.card_brand = payment_system
             pm.is_active = True
 
+        # Обновили данные по карте — очищаем кеши реквизитов по обоим ключам (db_user.id и tg_user_id),
+        # чтобы get_user и личный кабинет использовали свежий снимок платежных методов
+        invalidate_payment_methods_cache(db_user.id)
         invalidate_user_payment_methods_cache(tg_user_id)
 
 
@@ -606,6 +615,8 @@ def remove_card(
         pm.is_active = False
         pm.is_primary = False
 
+        # Карту деактивировали — очищаем кеши _PM_CACHE (по db_user.id) и _USER_PAYMENT_METHODS_CACHE (по tg_user_id)
+        invalidate_payment_methods_cache(db_user.id)
         invalidate_user_payment_methods_cache(tg_user_id)
 
 
@@ -651,7 +662,10 @@ def remove_phone(
             pm.is_active = False
             pm.is_primary = False
     
-        invalidate_payment_methods_cache(tg_user_id)
+        # Телефон деактивировали — сбрасываем кеш по внутреннему ID и по Telegram ID,
+        # чтобы ЛК и инлайн-запросы не показывали старые данные
+        invalidate_payment_methods_cache(db_user.id)
+        invalidate_user_payment_methods_cache(tg_user_id)
 
 
 # ============================================================
