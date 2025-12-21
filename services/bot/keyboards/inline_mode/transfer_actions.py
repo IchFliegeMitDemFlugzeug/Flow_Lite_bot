@@ -101,7 +101,7 @@ def build_transfer_actions_keyboard(
     # ВАЖНО: у кнопки должен быть ровно ОДИН тип действия.
     # Здесь это URL-кнопка, поэтому используем поле url=...
     transfer_button: InlineKeyboardButton = InlineKeyboardButton(        # Создаём объект кнопки
-        text="☑ Перейти к оплате",                                      # Текст на кнопке (можешь переименовать)
+        text="☑ Открыть банк",                                      # Текст на кнопке (можешь переименовать)
         url=mini_app_url,                                                # Ссылка на Mini App (direct link)
     )
 

@@ -6,6 +6,7 @@ services
 │   │   │   ├── 445952203.json
 │   │   │   └── 8540412036.json
 │   │   ├── __init__.py
+│   │   ├── api_functions
 │   │   ├── models.py
 │   │   └── storage.py
 │   ├── handlers
@@ -24,8 +25,17 @@ services
 │   ├── headlines
 │   │   ├── inline_mode
 │   │   │   ├── Inline_preview.py
-│   │   │   ├── LOGO_SBER.jpeg
-│   │   │   ├── LOGO_SBER.png
+│   │   │   ├── LOGO_ALFABANK.jpg
+│   │   │   ├── LOGO_GAZPROMBANK.jpg
+│   │   │   ├── LOGO_MKB.jpg
+│   │   │   ├── LOGO_MTSBANK.jpg
+│   │   │   ├── LOGO_POCHTABANK.jpg
+│   │   │   ├── LOGO_PSB.jpg
+│   │   │   ├── LOGO_RSHB.jpg
+│   │   │   ├── LOGO_SBER.jpg
+│   │   │   ├── LOGO_SOVKOMBANK.jpg
+│   │   │   ├── LOGO_TBANK.jpg
+│   │   │   ├── LOGO_VTB.jpg
 │   │   │   └── __init__.py
 │   │   ├── __init__.py
 │   │   ├── add_headline.py
