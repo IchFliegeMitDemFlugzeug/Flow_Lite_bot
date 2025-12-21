@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <!-- Кодировка страницы -->
+  <meta charset="UTF-8">
+  <!-- Адаптивная вёрстка под ширину устройства -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Заголовок вкладки -->
+  <title>Переход в банк</title>
+  <!-- Небольшие стили, чтобы страница выглядела опрятно -->
+  <style>
+    /* Обёртка на всю высоту экрана */
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background: radial-gradient(circle at 20% 20%, rgba(0,0,0,0.05), transparent 40%),
+                  radial-gradient(circle at 80% 0%, rgba(0,0,0,0.05), transparent 30%),
+                  #f7f9fb;
+      color: #1f1f1f;
+      text-align: center;
+    }
+    /* Карточка с подсказкой */
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+      max-width: 360px;
+      width: 90%;
+    }
+    /* Заголовок */
+    .card h1 {
+      margin: 0 0 12px 0;
+      font-size: 20px;
+    }
+    /* Подпись мелким шрифтом */
+    .card p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #444;
+    }
+  </style>
+</head>
+<body>
+  <!-- Карточка с сообщением пользователю -->
+  <div class="card">
+    <h1>Открываем банк…</h1>
+    <p>Если приложение не открылось автоматически, вы будете перенаправлены на веб-страницу банка.</p>
+  </div>
+
+  <!-- Подключаем конфигурацию и отправку событий -->
+  <script src="./scripts/modules/constants.js"></script>
+  <script src="./scripts/modules/events.js"></script>
+  <!-- Логика редиректа с deep link и fallback -->
+  <script src="./scripts/redirect.js"></script>
+</body>
+</html>

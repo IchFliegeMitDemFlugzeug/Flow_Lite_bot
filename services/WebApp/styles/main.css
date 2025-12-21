@@ -1,0 +1,107 @@
+/* Сбрасываем базовые отступы и задаём высоту */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+/* Общие настройки для страницы: фон и flex-контейнер */
+body {
+  background-image: url('../assets/images/background.png');
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Шапка с кнопкой возврата и логотипом */
+.header {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  background-color: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* Кнопка "← Вернуться" в шапке */
+.back-btn {
+  border: none;
+  background: none;
+  font-size: 16px;
+  color: #333;
+  cursor: pointer;
+  margin-right: auto;
+}
+
+/* Основной логотип в шапке */
+.main-logo {
+  width: 80px;
+  height: auto;
+}
+
+/* Контейнер списка банков со скроллом */
+.bank-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  overscroll-behavior-y: contain;
+}
+
+/* Кадры анимации "выезд снизу" */
+@keyframes slideUp {
+  0% {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+  80% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Общий стиль кнопок банков */
+.btn {
+  width: 100%;
+  max-width: 500px;
+  margin: 8px auto;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(
+    to right,
+    white 0%,
+    white 15%,
+    rgba(255, 255, 255, 0.2) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transform: translateY(100px);
+}
+
+/* Иконка банка внутри кнопки */
+.btn img {
+  width: 32px;
+  height: auto;
+  margin-right: 12px;
+}
+
+/* Текст названия банка */
+.btn-text {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-weight: bold;
+  font-size: 16px;
+  color: #000;
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.2);
+}
