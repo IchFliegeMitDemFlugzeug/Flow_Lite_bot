@@ -27,7 +27,6 @@ import os  # os нужен, чтобы читать секрет из перем
 import logging  # logging нужен, чтобы писать предупреждения/диагностику, если match не найден
 
 from dataclasses import asdict  # asdict нужен, чтобы превращать dataclass в dict перед json.dumps
-from datetime import datetime, timezone  # datetime/timezone — чтобы добавить UTC-время создания токена
 from typing import List, Optional  # List — тип списка, Optional — тип "может быть None"
 
 from aiogram import Router  # Router — отдельный роутер для inline-логики
@@ -87,7 +86,8 @@ def _compute_transfer_id(  # Функция кодирует полный пак
     Что кладём внутрь пакета:
     - creator_tg_user_id — кто отправил инлайн-сообщение;
     - raw_query/parsed/option — что именно было в сообщении (банк, сумма, реквизит);
-    - generated_at — UTC-время формирования кнопки (приблизительное время отправки).
+    - без timestamp — специально убрали, чтобы transfer_id всегда совпадал между inline_query
+      (список) и chosen_inline_result (выбор).
 
     Почему так:
     - WebApp теперь сам получает все исходные данные через startapp-параметр,
@@ -100,7 +100,8 @@ def _compute_transfer_id(  # Функция кодирует полный пак
         "raw_query": raw_query,  # Исходный текст запроса
         "parsed": asdict(parsed_query),  # Распарсенная структура запроса
         "option": asdict(option),  # Детали выбранного реквизита
-        "generated_at": datetime.now(timezone.utc).isoformat(),  # Время генерации токена в UTC
+        # СОВСЕМ ВАЖНО: timestamp убрали, чтобы transfer_id был строго детерминированным
+        # и совпадал между этапами inline_query (показ списка) и chosen_inline_result (выбор).
     }  # Конец словаря
 
     secret: str = os.getenv("INLINE_TRANSFER_SECRET", "dev-change-me")  # Секрет для подписи
@@ -125,6 +126,30 @@ def _compute_transfer_id(  # Функция кодирует полный пак
     return encoded  # Возвращаем готовый transfer_id
 
 
+def _compute_result_id(  # Функция строит короткий id для inline-результата (Telegram требует <=64 символов)
+    *,  # Используем только именованные аргументы, чтобы не перепутать порядок
+    transfer_id: str,  # Полный transfer_id с данными для WebApp (может быть длинным)
+) -> str:  # Возвращаем короткий детерминированный идентификатор
+    """  # Докстринг функции
+    Telegram ограничивает длину InlineQueryResult.id 64 символами, поэтому
+    мы делаем отдельный короткий идентификатор на базе полного transfer_id:
+    - хэшируем transfer_id через SHA-256;
+    - берём первые 16 байт хэша (достаточно уникальности для наших случаев);
+    - кодируем в urlsafe base64 без '=';
+    - получаем строку около 22 символов, удовлетворяющую лимиту и детерминированную.
+    """  # Конец докстринга
+
+    sha_digest: bytes = hashlib.sha256(  # Считаем SHA-256 от полного transfer_id
+        transfer_id.encode("utf-8")  # Переводим строку в байты
+    ).digest()  # Получаем байтовое представление хэша
+
+    short_digest: bytes = sha_digest[:16]  # Берём первые 16 байт (128 бит) для компактности
+
+    result_id: str = base64.urlsafe_b64encode(short_digest).decode("ascii").rstrip("=")  # Кодируем в base64 и убираем '='
+
+    return result_id  # Возвращаем короткий id, подходящий Telegram
+
+
 def _make_inline_article(  # Функция делает один элемент "зелёного списка"
     *,  # Только именованные аргументы
     option: InlinePaymentOption,  # Вариант реквизита
@@ -143,12 +168,16 @@ def _make_inline_article(  # Функция делает один элемент
     - запись в БД будет происходить в handle_chosen_inline_result(), когда пользователь реально выбрал вариант.
     """  # Конец докстринга
 
-    transfer_id: str = _compute_transfer_id(  # Вычисляем детерминированный token
+    transfer_id: str = _compute_transfer_id(  # Вычисляем детерминированный token (полная версия для WebApp)
         creator_user_id=creator_user_id,  # Передаём TG id пользователя
         raw_query=raw_query,  # Передаём исходный текст запроса
         option=option,  # Передаём вариант (телефон/карта и т.д.)
         parsed_query=parsed,  # Передаём распарсенный запрос (чтобы не парсить повторно)
     )  # Получаем transfer_id
+
+    result_id: str = _compute_result_id(  # Считаем укороченный id для InlineQueryResult (вписывается в лимит Telegram)
+        transfer_id=transfer_id,  # Передаём полный transfer_id, чтобы детерминированно получить короткий
+    )  # Получаем короткий result_id
 
     message_text: str = build_transfer_message_text(  # Собираем текст сообщения, которое улетит в чат
         option=option,  # Выбранные реквизиты (телефон/карта)
@@ -171,7 +200,7 @@ def _make_inline_article(  # Функция делает один элемент
     )  # Может вернуть None, если логотип не настроен или банк не указан
 
     article_kwargs: dict = {  # Собираем параметры результата в словарь (так удобнее добавлять thumbnail)
-        "id": transfer_id,  # id результата — это наш transfer_id (потом он придёт в chosen_inline_result.result_id)
+        "id": result_id,  # id результата — укороченная версия (Telegram принимает <=64 символов)
         "title": option.title,  # Заголовок строки списка
         "description": option.description,  # Подпись серым
         "input_message_content": input_content,  # Контент сообщения, который отправится в чат при выборе
@@ -315,14 +344,18 @@ async def handle_chosen_inline_result(chosen: ChosenInlineResult) -> None:  # А
     matched_option: Optional[InlinePaymentOption] = None  # Переменная под найденный вариант (пока None)
 
     for option in options:  # Перебираем варианты и ищем тот, чей transfer_id совпал с result_id
-        transfer_id: str = _compute_transfer_id(  # Вычисляем transfer_id для текущего option
+        transfer_id: str = _compute_transfer_id(  # Вычисляем полный transfer_id для текущего option
             creator_user_id=chosen.from_user.id,  # id пользователя (создателя)
             raw_query=raw_query,  # исходный запрос
             option=option,  # текущий вариант
             parsed_query=parsed,  # Передаём распарсенный запрос
         )  # Получаем детерминированный токен
 
-        if transfer_id == result_id:  # Сравниваем с тем, что реально выбрали
+        computed_result_id: str = _compute_result_id(  # Строим короткий id так же, как в inline_query
+            transfer_id=transfer_id,  # Передаём полный transfer_id
+        )  # Получаем детерминированный короткий id
+
+        if computed_result_id == result_id:  # Сравниваем с тем, что реально выбрали
             matched_option = option  # Если совпало — сохраняем найденный option
             break  # Выходим из цикла, потому что вариант найден
 
