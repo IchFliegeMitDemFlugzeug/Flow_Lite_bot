@@ -97,12 +97,7 @@
 
     const fullUrl = redirectUrl.toString(); // Получаем итоговую строку URL
 
-    if (window.Telegram && Telegram.WebApp) { // Если работаем внутри Telegram
-      Telegram.WebApp.openLink(fullUrl, { try_instant_view: false }); // Открываем ссылку через API Telegram
-      return; // Останавливаем дальнейшее выполнение
-    }
-
-    window.location.href = fullUrl; // В обычном браузере просто переходим по ссылке
+    window.location.href = fullUrl; // В любом окружении переходим на страницу редиректа внутри WebView
   }
 
   function preloadAssetsAndAnimate(banks) { // Предзагружаем фон и логотипы, затем показываем кнопки
