@@ -56,8 +56,8 @@
     safePost(payload); // Отправляем событие на сервер с защитой
   }
 
-  function sendBankClick(context, bankId) { // Публичная функция для события клика по банку
-    const payload = buildPayload(context, 'bank_click', bankId, 'miniapp'); // Собираем полезную нагрузку
+  function sendBankClick(context, bankId, extraMeta) { // Публичная функция для события клика по банку
+    const payload = buildPayload(context, 'bank_click', bankId, 'miniapp', extraMeta); // Собираем полезную нагрузку вместе с meta
     safePost(payload); // Отправляем событие
   }
 
