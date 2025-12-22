@@ -1,0 +1,63 @@
+# Имя workflow, чтобы сразу было понятно, что он вручную публикует index.html на GitHub Pages.
+name: "Manual Publish index.html"
+
+# Событие, запускающее процесс вручную через интерфейс Actions.
+on:
+  # Единственный триггер — ручной запуск, чтобы можно было дернуть публикацию без пуша.
+  workflow_dispatch:
+
+# Права, необходимые для чтения репозитория и публикации артефакта на GitHub Pages.
+permissions:
+  # Право читать файлы из репозитория.
+  contents: read
+  # Право записывать артефакт на GitHub Pages.
+  pages: write
+  # Право получать OIDC-токен, который нужен actions/deploy-pages.
+  id-token: write
+
+# Ограничиваем параллельные запуски, чтобы не публиковать несколько версий одновременно.
+concurrency:
+  # Уникальное имя группы параллельности для ручной публикации.
+  group: "manual-pages"
+  # Если запущен новый workflow, предыдущий незавершённый отменяется.
+  cancel-in-progress: true
+
+jobs:
+  # Первый job готовит артефакт со статикой и отдаёт его на деплой.
+  build:
+    # Запускаем сборку на свежем ubuntu-latest.
+    runs-on: ubuntu-latest
+    steps:
+      # Клонируем репозиторий в рабочую директорию раннера.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      # Конфигурируем поддержку GitHub Pages для статики без генераторов.
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          # Сообщаем, что сайт собирается вручную, без стандартных генераторов.
+          static_site_generator: custom
+      # Загружаем в артефакт всю директорию WebApp, где лежит index.html и ассеты.
+      - name: Upload static site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Передаём путь к папке со статикой, чтобы action упаковал её целиком.
+          path: services/WebApp
+
+  # Второй job разворачивает подготовленный артефакт на GitHub Pages.
+  deploy:
+    # Ждём завершения сборки, чтобы опубликовать готовый артефакт.
+    needs: build
+    # Используем тот же образ ubuntu-latest.
+    runs-on: ubuntu-latest
+    # Подключаем окружение GitHub Pages, чтобы получить итоговый URL.
+    environment:
+      # Имя окружения по умолчанию для GitHub Pages.
+      name: github-pages
+      # URL публикации берём из шага деплоя.
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Разворачиваем артефакт, загруженный предыдущим job'ом.
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
