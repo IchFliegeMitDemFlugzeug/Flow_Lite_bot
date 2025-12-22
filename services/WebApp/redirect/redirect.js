@@ -10,6 +10,9 @@
     const fallbackParam = query.get('fallback_url') || ''; // Подстраховочный fallback из query
     const telegramContext = window.TelegramBridge.getTelegramContext(); // Собираем контекст Telegram или браузера
     telegramContext.startParam = telegramContext.startParam || transferId; // Прокидываем transfer_id из параметров, если он есть
+    const userAgent = navigator.userAgent || ''; // Считываем user agent для определения платформы
+    const isIOS = /iphone|ipad|ipod/i.test(userAgent); // Проверяем, что устройство — iOS
+    const isSafari = isIOS && /safari/i.test(userAgent) && !/crios|fxios|edgios|opt\//i.test(userAgent); // Убеждаемся, что браузер — Safari, а не обёртка Chromium/Firefox
 
     window.ApiClient.sendRedirectEvent(telegramContext, bankId, 'redirect_open', 'redirect', { link_token: linkToken }); // Логируем открытие страницы редиректа
 
@@ -60,7 +63,17 @@
       }, { once: true }); // Слушаем только один раз
 
       try { // Пробуем открыть deep link
-        window.location.href = bank.deeplink; // Переходим по deep link
+        if (isSafari) { // Для Safari используем скрытый iframe, чтобы избежать системной ошибки "не могу открыть ссылку"
+          const iframe = document.createElement('iframe'); // Создаём iframe для незаметной навигации
+          iframe.style.display = 'none'; // Прячем iframe, чтобы не ломать вёрстку
+          iframe.src = bank.deeplink; // Указываем deep link как источник
+          document.body.appendChild(iframe); // Вставляем iframe в DOM, чтобы запуск произошёл
+          setTimeout(function () { // Через короткую паузу
+            document.body.removeChild(iframe); // Удаляем iframe, чтобы не оставлять мусор в DOM
+          }, 1500); // Держим iframe чуть дольше таймера fallback
+        } else { // Во всех остальных браузерах
+          window.location.href = bank.deeplink; // Перенаправляемся напрямую по deep link
+        }
       } catch (error) { // Если что-то пошло не так
         console.debug('Redirect: не удалось открыть deeplink', error); // Пишем ошибку в debug
         switchToFallback(bank); // Переключаемся на веб
@@ -69,8 +82,9 @@
 
     function switchToFallback(bank) { // Переход на fallback URL
       window.ApiClient.sendRedirectEvent(telegramContext, bank.id, 'redirect_fallback'); // Логируем откат на веб
-      if (bank.fallback_url) { // Если fallback указан
-        window.location.href = bank.fallback_url; // Выполняем переход на веб-страницу
+      const targetUrl = bank.fallback_url || bank.deeplink || ''; // Выбираем безопасный адрес: сначала fallback, затем deeplink
+      if (targetUrl) { // Если адрес найден
+        window.location.href = targetUrl; // Выполняем переход на веб-страницу или повторно в deeplink
       }
     }
 
