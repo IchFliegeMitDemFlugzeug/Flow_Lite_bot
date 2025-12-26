@@ -41,7 +41,7 @@ async def remove_previous_bot_keyboard(
     # --- Шаг 2. Если в FSM нет ID — пробуем прочитать его из БД --- #
 
     if not last_id:                                        # Если last_id пустой/None/0
-        last_id = get_last_bot_message_id(chat_id=chat_id) # Пытаемся получить ID из файловой базы
+        last_id = await get_last_bot_message_id(chat_id=chat_id) # Пытаемся получить ID из файловой базы
 
     # --- Шаг 3. Если ID по-прежнему нет — выходим --- #
 

@@ -13,7 +13,9 @@
 from __future__ import annotations                               # Разрешаем "отложенные" аннотации типов (удобно для type hints)
 
 import textwrap                                                  # Импортируем модуль textwrap для переноса строк
-from typing import List                                          # Импортируем List для аннотаций типов
+from typing import List
+import inspect
+# Импортируем List для аннотаций типов
 
 from ..database import get_user                                  # Импортируем функцию получения пользователя из "базы"
 from ..tools.banks_wordbook import BANKS                         # Импортируем словарь банков (код -> данные банка)
@@ -26,6 +28,13 @@ WHITE_SQUARE: str = "📱"
 
 # Максимальная длина строки перед ручным переносом
 MAX_LINE_WIDTH: int = 30                                         # При превышении длины строки будем делать перенос
+
+
+async def _maybe_await(value):
+    """Return awaited value if it's awaitable, otherwise return as-is."""
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def _wrap_with_indent(line: str) -> str:
@@ -134,7 +143,7 @@ def _format_bank_title(bank_code: str, is_main: bool) -> str:
         return f"    {title}"                                   # 4 пробела + обычный текст (без форматирования)
 
 
-def build_personal_cabinet_text(
+async def build_personal_cabinet_text(
     user_id: int,                                               # ID пользователя в Telegram
     show_details: bool,                                         # Флаг: показывать ли реквизиты целиком
 ) -> str:
@@ -143,7 +152,7 @@ def build_personal_cabinet_text(
 
     Возвращается строка с разметкой Markdown, уже разбитая на строки с учётом отступов и переносов.
     """
-    user = get_user(user_id)                                   # Получаем объект пользователя из файловой "базы"
+    user = await _maybe_await(get_user(user_id))               # Получаем пользователя из БД (sync или async)
 
     lines: List[str] = []                                      # Список логических строк будущего сообщения
 
