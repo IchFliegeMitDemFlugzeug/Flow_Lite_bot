@@ -10,6 +10,9 @@ from aiogram.types import (                             # Импортируем
 
 from ..database import set_last_bot_message_id          # Функция из нашей "БД": сохраняет ID последнего сообщения бота
 
+import inspect
+from typing import Any
+
 
 # --- Константы типов заголовков --- #
 
@@ -85,13 +88,19 @@ async def send_message_with_headline(
     # После успешной отправки сохраняем ID этого сообщения как "последнее сообщение бота" для данного чата.
     # Это нужно, чтобы позже можно было удалить у него клавиатуру, даже после перезапуска бота.
     if message.chat:                                       # Проверяем, что у исходного message есть chat (должен быть всегда)
-        set_last_bot_message_id(
+        await set_last_bot_message_id(
             chat_id=message.chat.id,                       # ID чата
             message_id=sent_message.message_id,            # ID только что отправленного сообщения бота
         )
 
     # Возвращаем отправленное сообщение наружу (чтобы хэндлер мог сохранить его ID в FSM и т.п.)
     return sent_message
+
+
+async def _maybe_await(value: Any):
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 async def edit_message_with_headline(
@@ -117,7 +126,7 @@ async def edit_message_with_headline(
     # в нём задаём и сам файл, и новый caption, и режим разметки.
     media: InputMediaPhoto = InputMediaPhoto(
         media=photo,                                       # Сам файл-картинка
-        caption=text,                                      # Новый текст под картинкой
+        caption=await _maybe_await(text),                                      # Новый текст под картинкой
         parse_mode=parse_mode,                             # Режим разбора разметки (Markdown)
     )
 
@@ -132,7 +141,7 @@ async def edit_message_with_headline(
     # Обновляем запись о "последнем сообщении бота" для данного чата.
     # ID сообщения, по сути, тот же, но полезно синхронизировать.
     if message.chat:
-        set_last_bot_message_id(
+        await set_last_bot_message_id(
             chat_id=message.chat.id,                      # ID чата
             message_id=edited_message.message_id,         # ID (тот же, но фиксируем как актуальный)
         )

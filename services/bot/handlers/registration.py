@@ -51,7 +51,7 @@ from ..headlines.add_headline import (                      # Функции и 
     HEADLINE_BASE,                                          # Базовая картинка (стартовый экран, общие сообщения)
 )
 
-from ..database import (                                    # Функции работы с файловой "базой данных"
+from ..database import (                                    # Функции работы с БД (async)
     get_user,                                               # Получить (или создать) пользователя по user_id
     update_basic_user_info,                                 # Обновить базовую информацию о пользователе
     add_or_update_phone,                                    # Добавить/обновить номер телефона с банками и основным банком
@@ -66,7 +66,7 @@ from ..tools.phone_utils import extract_phone_from_message  # Импортиру
 registration_router = Router(name="registration")           # Роутер с именем "registration" — удобно для отладки и структуры
 
 
-def _is_user_registered(user_id: int) -> bool:
+async def _is_user_registered(user_id: int) -> bool:
     """
     Проверяем, считается ли пользователь ПОЛНОСТЬЮ зарегистрированным.
 
@@ -75,7 +75,7 @@ def _is_user_registered(user_id: int) -> bool:
     - и есть хотя бы один номер с ненулевым списком банков.
     """
 
-    user = get_user(user_id)                                # Загружаем объект пользователя из "базы"
+    user = await get_user(user_id)                                # Загружаем объект пользователя из "базы"
 
     if user.registration_step != "completed":               # Если шаг регистрации НЕ "completed"
         return False                                        # Сразу говорим, что регистрация не закончена
@@ -87,13 +87,13 @@ def _is_user_registered(user_id: int) -> bool:
     return False                                            # Иначе — нет ни одного номера с банком, значит регистрация не завершена
 
 
-def _get_phone_from_state_or_db(user_id: int, fsm_data: dict) -> str | None:
+async def _get_phone_from_state_or_db(user_id: int, fsm_data: dict) -> str | None:
     """
     Универсальный способ получить НОМЕР ТЕЛЕФОНА, чтобы не получить 'неизвестен'.
 
     Приоритет:
     1) Берём phone из FSM (если там уже есть).
-    2) Если нет — читаем (step, current_phone) из файловой БД.
+    2) Если нет — читаем (step, current_phone) из БД.
     3) Если current_phone не задан — пробуем user.current_phone или первый номер из user.phones.
     4) Если вообще ничего нет — возвращаем None.
     """
@@ -102,11 +102,11 @@ def _get_phone_from_state_or_db(user_id: int, fsm_data: dict) -> str | None:
     if phone:                                               # Если в FSM номер есть
         return phone                                        # Сразу возвращаем его
 
-    step, current_phone = get_registration_progress(user_id)  # Читаем прогресс регистрации из файла
+    step, current_phone = await get_registration_progress(user_id)  # Читаем прогресс регистрации из файла
     if current_phone:                                       # Если в файле указан current_phone
         return current_phone                                # Используем его
 
-    user = get_user(user_id)                                # Загружаем пользователя из файловой БД
+    user = await get_user(user_id)                                # Загружаем пользователя из БД
 
     if user.current_phone:                                  # Если в объекте пользователя сохранён current_phone
         return user.current_phone                           # Возвращаем его
@@ -122,7 +122,7 @@ async def _restore_registration_step_from_db(
     state: FSMContext,
 ) -> bool:
     """
-    Пытаемся восстановить шаг регистрации пользователя из файловой БД
+    Пытаемся восстановить шаг регистрации пользователя из БД
     и "вернуть" его на тот же экран после перезапуска бота или /start.
 
     Возвращаем:
@@ -131,9 +131,9 @@ async def _restore_registration_step_from_db(
     """
 
     user_id = message.from_user.id                          # Берём Telegram ID пользователя
-    user = get_user(user_id)                                # Загружаем его запись из "базы"
+    user = await get_user(user_id)                                # Загружаем его запись из "базы"
 
-    step, current_phone = get_registration_progress(user_id)  # Читаем сохраненный шаг и текущий номер телефона
+    step, current_phone = await get_registration_progress(user_id)  # Читаем сохраненный шаг и текущий номер телефона
 
     if step is None:                                        # Если шаг не сохранён
         return False                                        # Нечего восстанавливать
@@ -163,7 +163,7 @@ async def _restore_registration_step_from_db(
             if user.phones:                                 # Если вообще есть телефоны в БД
                 phone = next(iter(user.phones.keys()))      # Берём первый номер
             else:                                           # Если телефонов нет вовсе
-                set_registration_progress(user_id, "phone", None)  # Откатываем шаг до "phone"
+                await set_registration_progress(user_id, "phone", None)  # Откатываем шаг до "phone"
                 await state.set_state(RegistrationStates.waiting_for_phone)  # FSM в состояние ожидания телефона
                 sent_message = await send_message_with_headline(  # Шлём запрос номера
                     message=message,
@@ -204,7 +204,7 @@ async def _restore_registration_step_from_db(
     if step == "main_bank":
         phone = current_phone                               # Берём current_phone
         if not phone or phone not in user.phones:           # Если номер не задан или его нет в словаре
-            set_registration_progress(user_id, "banks", None)  # Откатываемся до шага "banks"
+            await set_registration_progress(user_id, "banks", None)  # Откатываемся до шага "banks"
             return await _restore_registration_step_from_db(message, state)  # Рекурсивно восстанавливаем "banks"
 
         phone_data = user.phones.get(phone)                 # Берём данные по номеру
@@ -212,7 +212,7 @@ async def _restore_registration_step_from_db(
         main_bank = phone_data.main_bank if phone_data else None
 
         if not selected_banks:                              # Если по номеру не выбрано ни одного банка
-            set_registration_progress(user_id, "banks", phone)  # Возвращаемся к шагу выбора банков
+            await set_registration_progress(user_id, "banks", phone)  # Возвращаемся к шагу выбора банков
             return await _restore_registration_step_from_db(message, state)
 
         await state.update_data(                            # Сохраняем в FSM номер, банки и основной банк
@@ -285,7 +285,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     """
     Стартовая точка.
 
-    1) Обновляем базовую информацию о пользователе в файловой БД.
+    1) Обновляем базовую информацию о пользователе в БД.
     2) Убираем клавиатуру у предыдущего сообщения бота (если было).
     3) Сбрасываем FSM.
     4) Если регистрация завершена — отправляем экран «Личный кабинет».
@@ -293,7 +293,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     6) Иначе показываем стартовый экран с документами.
     """
 
-    update_basic_user_info(                                # Обновляем базовые данные в JSON-файле "пользователь"
+    await update_basic_user_info(                                # Обновляем базовые данные пользователя в БД
         user_id=message.from_user.id,                      # ID пользователя из Telegram
         first_name=message.from_user.first_name,           # Имя пользователя
         last_name=message.from_user.last_name,             # Фамилия пользователя (может быть None)
@@ -312,7 +312,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     # --- Ключевая развилка: зарегистрирован / не зарегистрирован --- #
 
-    if _is_user_registered(user_id):                       # Проверяем, считается ли пользователь полностью зарегистрированным
+    if await _is_user_registered(user_id):                       # Проверяем, считается ли пользователь полностью зарегистрированным
         # Если да — сразу показываем экран «Личный кабинет».
         # Вся логика показа ЛК живёт в отдельном модуле personal_cabinet.
         await send_personal_cabinet_screen(
@@ -323,7 +323,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     # --- Если пользователь НЕ зарегистрирован полностью --- #
 
-    # Пытаемся восстановить шаг регистрации из файловой БД (после рестарта бота или повторного /start)
+    # Пытаемся восстановить шаг регистрации из БД (после рестарта бота или повторного /start)
     restored = await _restore_registration_step_from_db(
         message=message,                                   # Входящее сообщение /start
         state=state,                                       # FSM-контекст
@@ -397,7 +397,7 @@ async def process_start_menu(callback: CallbackQuery, state: FSMContext) -> None
     if action == "begin":                                  # Кнопка "Начать пользоваться"
         await callback.answer()                            # Закрываем "часики"
 
-        set_registration_progress(user_id, "phone", None)  # В БД фиксируем: шаг "phone", текущий номер не задан
+        await set_registration_progress(user_id, "phone", None)  # В БД фиксируем: шаг "phone", текущий номер не задан
 
         await state.set_state(RegistrationStates.waiting_for_phone)  # FSM в состояние ожидания телефона
 
@@ -448,14 +448,14 @@ async def process_phone(message: Message, state: FSMContext) -> None:
 
     user_id = message.from_user.id                          # Берём user_id
 
-    add_or_update_phone(                                    # Сохраняем номер в файловой БД (пока без банков и без основного банка)
+    await add_or_update_phone(                                    # Сохраняем номер в БД (пока без банков и без основного банка)
         user_id=user_id,
         phone=phone,
         banks=[],
         main_bank=None,
     )
 
-    set_registration_progress(user_id, "banks", phone)      # Фиксируем, что мы на шаге "banks" и работаем с этим номером
+    await set_registration_progress(user_id, "banks", phone)      # Фиксируем, что мы на шаге "banks" и работаем с этим номером
 
     await state.update_data(                                # Инициализируем в FSM пустой список банков и отсутствие основного банка
         selected_banks=[],
@@ -509,7 +509,7 @@ async def process_bank_choice(
 
     user_id = callback.from_user.id                        # Берём user_id
 
-    phone = _get_phone_from_state_or_db(user_id, fsm_data) # Пытаемся аккуратно достать номер из FSM или БД
+    phone = await _get_phone_from_state_or_db(user_id, fsm_data) # Пытаемся аккуратно достать номер из FSM или БД
     if not phone:                                          # Если даже тут не удалось восстановить номер
         phone = "неизвестен"                               # Подстрахуемся, чтобы не упасть в format()
 
@@ -520,7 +520,7 @@ async def process_bank_choice(
 
     # --- Сценарий "Нет нужного банка" --- #
     if action == "no_such":
-        set_registration_progress(user_id, "no_banks", phone)  # В БД: шаг "no_banks" и этот номер
+        await set_registration_progress(user_id, "no_banks", phone)  # В БД: шаг "no_banks" и этот номер
 
         no_banks_keyboard = build_no_bank_keyboard()       # Строим клавиатуру сценария "нет банка"
 
@@ -550,14 +550,14 @@ async def process_bank_choice(
             )
             return
 
-        add_or_update_phone(                               # В БД сохраняем список банков для этого номера
+        await add_or_update_phone(                               # В БД сохраняем список банков для этого номера
             user_id=user_id,
             phone=phone,
             banks=selected_banks,
             main_bank=None,
         )
 
-        set_registration_progress(user_id, "main_bank", phone)  # В БД: шаг "main_bank"
+        await set_registration_progress(user_id, "main_bank", phone)  # В БД: шаг "main_bank"
 
         readable_banks = [                                 # Формируем список "человеческих" названий банков
             BANKS[code]["message_title"]
@@ -610,7 +610,7 @@ async def process_bank_choice(
         selected_banks=selected_banks,
     )
 
-    add_or_update_phone(                                   # Синхронизируем список банков с файловой БД
+    await add_or_update_phone(                                   # Синхронизируем список банков с БД
         user_id=user_id,
         phone=phone,
         banks=selected_banks,
@@ -659,7 +659,7 @@ async def process_main_bank_choice(
     user_id: int = callback.from_user.id                   # Берём user_id из объекта callback (ID телеграм-пользователя)
 
     # --- Аккуратно достаём номер телефона из FSM или БД --- #
-    phone: str | None = _get_phone_from_state_or_db(       # Универсальная функция: пытается взять номер из FSM или файловой БД
+    phone: str | None = await _get_phone_from_state_or_db(       # Универсальная функция: пытается взять номер из FSM или БД
         user_id=user_id,                                   # Передаём user_id, чтобы можно было обратиться к записи пользователя в БД
         fsm_data=fsm_data,                                 # Передаём текущие данные FSM
     )
@@ -682,7 +682,7 @@ async def process_main_bank_choice(
     #   ВЕТКА: КНОПКА «НАЗАД»
     # =========================
     if action == "back":                                   # Если пользователь нажал кнопку "Назад"
-        set_registration_progress(                         # Обновляем состояние регистрации в файловой БД
+        await set_registration_progress(                         # Обновляем состояние регистрации в БД
             user_id,                                       # user_id пользователя
             "banks",                                       # Шаг регистрации — "banks" (выбор банков)
             phone,                                         # Текущий номер телефона, с которым идём на этот шаг
@@ -725,14 +725,14 @@ async def process_main_bank_choice(
         if main_bank is None and selected_banks:           # Если основного банка нет, но есть хоть один выбранный банк
             main_bank = selected_banks[0]                  # Назначаем основным первый по списку
 
-        add_or_update_phone(                               # Сохраняем настройки телефона и банков в файловую БД
+        await add_or_update_phone(                               # Сохраняем настройки телефона и банков в БД
             user_id=user_id,                               # ID пользователя
             phone=phone,                                   # Номер телефона
             banks=selected_banks,                          # Список выбранных банков
             main_bank=main_bank,                           # Основной банк
         )
 
-        set_registration_progress(                         # Фиксируем в БД, что регистрация завершена
+        await set_registration_progress(                         # Фиксируем в БД, что регистрация завершена
             user_id,                                       # user_id пользователя
             "completed",                                   # Шаг регистрации — "completed"
             None,                                          # current_phone нам больше не нужен — передаём None
@@ -786,7 +786,7 @@ async def process_main_bank_choice(
         main_bank=main_bank,                               # Сохраняем код основного банка
     )
 
-    add_or_update_phone(                                   # Синхронизируем выбор с файловой БД
+    await add_or_update_phone(                                   # Синхронизируем выбор с БД
         user_id=user_id,                                   # ID пользователя
         phone=phone,                                       # Номер телефона
         banks=selected_banks,                              # Список выбранных банков
@@ -833,12 +833,12 @@ async def no_bank(
     user_id = callback.from_user.id                                # user_id пользователя
 
     fsm_data = await state.get_data()                              # Берём текущие данные FSM
-    phone = _get_phone_from_state_or_db(user_id, fsm_data)         # Пытаемся достать номер
+    phone = await _get_phone_from_state_or_db(user_id, fsm_data)         # Пытаемся достать номер
     if not phone:
         phone = "неизвестен"                                       # На всякий случай
 
     if action == "back":                                           # Кнопка "Назад"
-        set_registration_progress(user_id, "banks", phone)         # В БД: шаг "banks" и этот номер
+        await set_registration_progress(user_id, "banks", phone)         # В БД: шаг "banks" и этот номер
 
         await state.set_state(RegistrationStates.waiting_for_banks)  # FSM в состояние выбора банков
 
@@ -866,7 +866,7 @@ async def no_bank(
         return
 
     if action == "start":                                          # Кнопка "Начать заново"
-        set_registration_progress(user_id, "phone", None)          # В БД: шаг "phone"
+        await set_registration_progress(user_id, "phone", None)          # В БД: шаг "phone"
 
         await callback.message.delete()                            # Удаляем текущее сообщение
         await state.clear()                                        # Полностью очищаем FSM

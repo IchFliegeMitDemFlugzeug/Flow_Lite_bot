@@ -21,7 +21,7 @@ from ..personal_cabinet import (                                     # Импо�
 )
 
 
-def build_phone_numbers_settings_text(
+async def build_phone_numbers_settings_text(
     user_id: int,                                                    # ID пользователя в Telegram (ключ JSON-файла)
 ) -> str:
     """
@@ -34,7 +34,7 @@ def build_phone_numbers_settings_text(
     - разметка — Markdown.
     """
 
-    user = get_user(user_id)                                         # Загружаем (или создаём) пользователя из "БД"
+    user = await get_user(user_id)                                         # Загружаем (или создаём) пользователя из "БД"
 
     lines: List[str] = []                                            # Список строк будущего сообщения
 

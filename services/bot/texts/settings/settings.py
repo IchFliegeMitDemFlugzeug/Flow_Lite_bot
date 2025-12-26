@@ -16,7 +16,7 @@ from ..personal_cabinet import (                                 # Импорт�
 )
 
 
-def build_settings_text(
+async def build_settings_text(
     user_id: int,                                               # ID пользователя в Telegram (ключ JSON-файла в БД)
 ) -> str:
     """
@@ -31,7 +31,7 @@ def build_settings_text(
     # Вызываем функцию формирования текста личного кабинета:
     #  - user_id — ID пользователя (совпадает с именем JSON-файла);
     #  - show_details=True — включаем "режим подробностей".
-    return build_personal_cabinet_text(
+    return await build_personal_cabinet_text(
         user_id=user_id,                                        # Передаём ID пользователя
         show_details=True,                                      # ВСЕГДА показываем реквизиты полностью
     )

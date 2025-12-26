@@ -10,18 +10,18 @@
 
 from __future__ import annotations
 
-import json
-from contextlib import contextmanager
-from pathlib import Path
-from typing import Dict, Iterator
+import os
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
-from sqlalchemy import create_engine
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from .models import Base
-
-import os
 
 # ----------------------------------------------------------------------
 # Настройки подключения к MySQL
@@ -40,39 +40,35 @@ try:
 except Exception as exc:
     raise RuntimeError(f"Invalid DATABASE_URL value: {DATABASE_URL!r}") from exc
 
-engine = create_engine(
+engine = create_async_engine(
     DATABASE_URL,
     echo=False,
     pool_pre_ping=True,
-    future=True,
 )
 
-SessionLocal = sessionmaker(
+SessionLocal = async_sessionmaker(
     bind=engine,
     autoflush=False,
-    autocommit=False,
     expire_on_commit=False,
 )
 
-
-@contextmanager
-def get_session() -> Iterator[Session]:
+@asynccontextmanager
+async def get_session() -> AsyncIterator[AsyncSession]:
     """Context manager that yields a SQLAlchemy session."""
-    session: Session = SessionLocal()
-    try:
-        yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    async with SessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
-def init_db() -> None:
+async def init_db() -> None:
     """
     Optional helper to create tables from ORM models.
 
     В вашем случае таблицы создаются DDL-скриптом, поэтому обычно не нужен.
     """
-    Base.metadata.create_all(bind=engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)

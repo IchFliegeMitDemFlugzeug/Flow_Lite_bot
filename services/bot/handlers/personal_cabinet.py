@@ -102,7 +102,7 @@ async def send_personal_cabinet_screen(
     #  - для жирного использовать ОДИНАРНЫЕ звёздочки: *текст*, а не **текст**;
     #  - не генерировать последовательность "***" (например, "Телефон *** 44-55"),
     #    либо оборачивать её в `код`, иначе Telegram выдаст ошибку разбора разметки.
-    cabinet_text: str = build_personal_cabinet_text(
+    cabinet_text: str = await build_personal_cabinet_text(
         user_id=user_id,                    # Передаём Telegram ID пользователя, вычисленный по chat.id
         show_details=show_details,          # Флаг "показать реквизиты" / "скрыть реквизиты"
     )
@@ -182,7 +182,7 @@ async def on_toggle_details_button(
     new_show_details: bool = not current_show_details
 
     # Пересобираем текст личного кабинета с учётом нового флага
-    new_text: str = build_personal_cabinet_text(
+    new_text: str = await build_personal_cabinet_text(
         user_id=callback.from_user.id,      # ID пользователя берём из callback.from_user.id
         show_details=new_show_details,      # Новое состояние видимости реквизитов
     )
