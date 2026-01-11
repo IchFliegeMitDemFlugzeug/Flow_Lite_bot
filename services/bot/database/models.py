@@ -19,16 +19,20 @@ import enum
 from sqlalchemy import (
     Boolean,
     CHAR,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
+    SmallInteger,
     String,
     Text,
+    UniqueConstraint,
     Enum as SAEnum,
     text,
 )
-from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInt
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInt, JSON as MySQLJSON
 from sqlalchemy.orm import declarative_base, relationship
 
 # ============================================================
@@ -239,8 +243,7 @@ class DBUser(Base):
     full_name = Column(String(255))
     phone = Column(String(64))
     language_code = Column(String(8), nullable=False, default="ru")
-    # В DDL raw_tg_json имеет тип JSON, здесь для простоты используем Text.
-    raw_tg_json = Column(Text)
+    raw_tg_json = Column(MySQLJSON)
 
     # В DDL: NOT NULL DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP
     created_at = Column(
@@ -257,37 +260,47 @@ class DBUser(Base):
     deleted_at = Column(DateTime)
     authorised_at = Column(DateTime)
 
+    __table_args__ = (
+        Index("idx_tg_username", "tg_username"),
+    )
+
     payment_methods = relationship(
         "DBUserPaymentMethod",
         back_populates="user",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     sent_payments = relationship(
         "Payment",
         back_populates="specialist",
         foreign_keys="Payment.specialist_id",
+        lazy="selectin",
     )
 
     received_payments = relationship(
         "Payment",
         back_populates="client",
         foreign_keys="Payment.client_id",
+        lazy="selectin",
     )
 
     templates = relationship(
         "MessageTemplate",
         back_populates="specialist",
+        lazy="selectin",
     )
 
     bot_steps = relationship(
         "BotLastStep",
         back_populates="user",
+        lazy="selectin",
     )
 
     last_messages = relationship(
         "ChatLastMessage",
         back_populates="user",
+        lazy="selectin",
     )
 
 
@@ -296,6 +309,19 @@ class DBUserPaymentMethod(Base):
     ORM-отображение таблицы tg_lite_bot.user_payment_methods.
     """
     __tablename__ = "user_payment_methods"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "method_type",
+            "provider",
+            "pay_method_number",
+            name="user_payment_methods_user_id_IDX",
+        ),
+        Index("idx_spm_primary", "user_id", "is_primary"),
+        Index("idx_spm_active", "user_id", "is_active"),
+        Index("idx_spm_status", "user_id", "status"),
+    )
 
     id = Column(MySQLBigInt(unsigned=True), primary_key=True, autoincrement=True)
     user_id = Column(
@@ -310,8 +336,8 @@ class DBUserPaymentMethod(Base):
     psp_token = Column(String(255))
     card_brand = Column(String(32))
     pay_method_number = Column(String(64), nullable=False)
-    card_exp_month = Column(Integer)
-    card_exp_year = Column(Integer)
+    card_exp_month = Column(SmallInteger)
+    card_exp_year = Column(SmallInteger)
     status = Column(
         SAEnum(PaymentMethodStatus),
         nullable=False,
@@ -333,8 +359,8 @@ class DBUserPaymentMethod(Base):
         onupdate=text("CURRENT_TIMESTAMP"),
     )
 
-    user = relationship("DBUser", back_populates="payment_methods")
-    payments = relationship("Payment", back_populates="method")
+    user = relationship("DBUser", back_populates="payment_methods", lazy="selectin")
+    payments = relationship("Payment", back_populates="method", lazy="selectin")
 
 
 class Payment(Base):
@@ -342,6 +368,12 @@ class Payment(Base):
     ORM-отображение таблицы tg_lite_bot.payments.
     """
     __tablename__ = "payments"
+
+    __table_args__ = (
+        CheckConstraint("amount_minor > 0", name="payments_chk_1"),
+        Index("idx_pay_status", "specialist_id", "status", "created_at"),
+        Index("payments_specialist_id_IDX", "specialist_id", "method_id"),
+    )
 
     id = Column(MySQLBigInt(unsigned=True), primary_key=True, autoincrement=True)
     specialist_id = Column(
@@ -387,13 +419,15 @@ class Payment(Base):
         "DBUser",
         foreign_keys=[specialist_id],
         back_populates="sent_payments",
+        lazy="selectin",
     )
     client = relationship(
         "DBUser",
         foreign_keys=[client_id],
         back_populates="received_payments",
+        lazy="selectin",
     )
-    method = relationship("DBUserPaymentMethod", back_populates="payments")
+    method = relationship("DBUserPaymentMethod", back_populates="payments", lazy="selectin")
 
 
 class MessageTemplate(Base):
@@ -425,7 +459,7 @@ class MessageTemplate(Base):
         onupdate=text("CURRENT_TIMESTAMP"),
     )
 
-    specialist = relationship("DBUser", back_populates="templates")
+    specialist = relationship("DBUser", back_populates="templates", lazy="selectin")
 
 
 class BotLastStep(Base):
@@ -454,7 +488,7 @@ class BotLastStep(Base):
     )
     pay_method_number = Column(String(64))  # Номер телефона или карты
 
-    user = relationship("DBUser", back_populates="bot_steps")
+    user = relationship("DBUser", back_populates="bot_steps", lazy="selectin")
 
 
 class ChatLastMessage(Base):
@@ -481,4 +515,4 @@ class ChatLastMessage(Base):
     )
     last_message_id = Column(String(100), nullable=False)
 
-    user = relationship("DBUser", back_populates="last_messages")
+    user = relationship("DBUser", back_populates="last_messages", lazy="selectin")

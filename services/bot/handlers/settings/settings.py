@@ -103,7 +103,7 @@ async def send_settings_screen(
         user_id = message.from_user.id                               # Если chat почему-то None — берём from_user.id
 
     # --- Шаг 2. текст настроек --- #
-    settings_text: str = build_settings_text(                        # Формируем строку с текстом экрана «Настройки»
+    settings_text: str = await build_settings_text(                        # Формируем строку с текстом экрана «Настройки»
         user_id=user_id,                                             # Передаём идентификатор пользователя
     )
 
@@ -152,7 +152,7 @@ async def send_phone_numbers_settings_screen(
         user_id = message.from_user.id                               # user_id = ID отправителя
 
     # --- текст экрана телефонов --- #
-    phones_text: str = build_phone_numbers_settings_text(            # Формируем текст экрана «Настройки номеров телефонов»
+    phones_text: str = await build_phone_numbers_settings_text(            # Формируем текст экрана «Настройки номеров телефонов»
         user_id=user_id,                                             # Передаём ID пользователя
     )
 
@@ -201,7 +201,7 @@ async def send_cards_settings_screen(
         user_id = message.from_user.id                               # user_id = ID отправителя
 
     # --- текст экрана карт --- #
-    cards_text: str = build_cards_settings_text(                     # Текст экрана «Настройки банковских карт»
+    cards_text: str = await build_cards_settings_text(                     # Текст экрана «Настройки банковских карт»
         user_id=user_id,                                             # Передаём ID пользователя
     )
 
@@ -321,7 +321,7 @@ async def on_settings_back_button(
     # --- формируем текст ЛК --- #
     user_id: int = callback.from_user.id                             # ID пользователя (ключ JSON-файла)
 
-    personal_text: str = build_personal_cabinet_text(                # Формируем текст ЛК
+    personal_text: str = await build_personal_cabinet_text(                # Формируем текст ЛК
         user_id=user_id,                                             # Передаём ID пользователя
         show_details=show_details,                                   # Учитываем флаг видимости реквизитов
     )
