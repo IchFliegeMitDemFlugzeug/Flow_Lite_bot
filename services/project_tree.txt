@@ -1,25 +1,77 @@
 services
 ├── WebApp
-│   ├── LOGO.png
-│   ├── LOGO_ALFABANK.png
-│   ├── LOGO_GAZPROMBANK.png
-│   ├── LOGO_MKB.png
-│   ├── LOGO_MTSBANK.png
-│   ├── LOGO_POCHTABANK.png
-│   ├── LOGO_PSB.png
-│   ├── LOGO_RSHB.png
-│   ├── LOGO_SBER.png
-│   ├── LOGO_SOVKOMBANK.png
-│   ├── LOGO_TBANK.png
-│   ├── LOGO_VTB.png
-│   ├── background.png
-│   └── index.html
+│   ├── assets
+│   │   ├── bg
+│   │   │   └── background.png
+│   │   ├── images
+│   │   │   ├── LOGO.png
+│   │   │   ├── LOGO_ALFABANK.png
+│   │   │   ├── LOGO_GAZPROMBANK.png
+│   │   │   ├── LOGO_MKB.png
+│   │   │   ├── LOGO_MTSBANK.png
+│   │   │   ├── LOGO_POCHTABANK.png
+│   │   │   ├── LOGO_PSB.png
+│   │   │   ├── LOGO_RSHB.png
+│   │   │   ├── LOGO_SBER.png
+│   │   │   ├── LOGO_SOVKOMBANK.png
+│   │   │   ├── LOGO_TBANK.png
+│   │   │   ├── LOGO_VTB.png
+│   │   │   └── background.png
+│   │   └── img
+│   │       ├── banks
+│   │       │   ├── alfabank.png
+│   │       │   ├── gazprombank.png
+│   │       │   ├── mkb.png
+│   │       │   ├── mtsbank.png
+│   │       │   ├── pochtabank.png
+│   │       │   ├── psb.png
+│   │       │   ├── rshb.png
+│   │       │   ├── sber.png
+│   │       │   ├── sovcombank.png
+│   │       │   ├── tbank.png
+│   │       │   └── vtb.png
+│   │       └── logo.png
+│   ├── config
+│   │   └── banks.json
+│   ├── css
+│   │   └── app.css
+│   ├── js
+│   │   ├── api.js
+│   │   ├── app.js
+│   │   ├── banks.js
+│   │   └── telegram.js
+│   ├── link_builders
+│   │   ├── __init__.py
+│   │   ├── sber.py
+│   │   ├── tinkoff.py
+│   │   └── vtb.py
+│   ├── redirect
+│   │   ├── index.html
+│   │   ├── redirect.css
+│   │   └── redirect.js
+│   ├── schemas
+│   │   └── link_payload.py
+│   ├── scripts
+│   │   ├── modules
+│   │   │   ├── animations.js
+│   │   │   ├── constants.js
+│   │   │   ├── events.js
+│   │   │   ├── navigation.js
+│   │   │   └── preload.js
+│   │   ├── main.js
+│   │   └── redirect.js
+│   ├── styles
+│   │   └── main.css
+│   ├── tests
+│   │   ├── test_api_links.py
+│   │   └── test_link_builders.py
+│   ├── README.md
+│   ├── backend.py
+│   ├── index.html
+│   ├── redirect.html
+│   └── serve_index.py
 ├── bot
 │   ├── database
-│   │   ├── users
-│   │   │   ├── 1622929490.json
-│   │   │   ├── 445952203.json
-│   │   │   └── 8540412036.json
 │   │   ├── __init__.py
 │   │   ├── api_functions
 │   │   ├── models.py

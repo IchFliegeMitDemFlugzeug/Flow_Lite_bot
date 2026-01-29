@@ -1,81 +1,187 @@
-"""Простой HTTP-сервер для Mini App с динамической генерацией банковских ссылок."""
+# services/WebApp/backend.py
+"""
+Асинхронный backend для Mini App на aiohttp + async SQLAlchemy.
 
-from __future__ import annotations  # Включаем отложенные аннотации для читаемости
+Поддерживает:
+- POST /api/webapp                    -> сохранить событие Mini App в БД (+ прогреть TTL-кэш)
+- GET  /api/webapp?transfer_id=...    -> получить событие по transfer_id (TTL -> DB -> TTL)
+- GET  /api/links?transfer_id=...     -> как раньше
+- GET  /api/links/{token}            -> как раньше
 
-import json  # Работаем с JSON-телами запросов и ответов
-import logging  # Логируем ошибки и служебные события
-import time  # Используем unix-время для TTL токенов
-import uuid  # Генерируем уникальные токены ссылок
-from datetime import datetime  # Создаём человекочитаемые метки времени
-from http.server import BaseHTTPRequestHandler, HTTPServer  # Минимальный HTTP-сервер из стандартной библиотеки
-from pathlib import Path  # Работаем с путями до конфигураций
-from typing import Dict, List, Tuple  # Типизация для читаемости кода
-from urllib.parse import parse_qs, urlparse  # Разбираем URL и query-параметры
+ВАЖНО:
+- Код рассчитан на вашу DDL inline_webapp_events (id PK + UNIQUE transfer_id + TEXT поля).
+- Для асинхронной работы с БД нужен get_async_session() в services.bot.database.storage.
+  (Ниже отдельно даю пример, как должен выглядеть этот модуль.)
+"""
 
-from sqlalchemy import text  # Формируем SQL для записи телеметрии
-from sqlalchemy.exc import SQLAlchemyError  # Ловим ошибки SQLAlchemy
+from __future__ import annotations
 
-from services.WebApp.link_builders import get_builder  # Подключаем реестр конструкторов deeplink-ссылок
-from services.WebApp.schemas.link_payload import LinkBuilderRequest  # Тип запроса к конструктору ссылок
+import asyncio
+import json
+import logging
+import time
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
+from aiohttp import web
+from sqlalchemy import text
 
-logging.basicConfig(level=logging.INFO)  # Настраиваем базовый логгер
-logger = logging.getLogger(__name__)  # Получаем логгер этого модуля
+from services.WebApp.link_builders import get_builder
+from services.WebApp.schemas.link_payload import LinkBuilderRequest
 
+# Асинхронная сессия проекта
+from services.bot.database.storage import get_session  # должен быть asynccontextmanager, см. пример ниже
 
-class LinkTokenStore:  # Простое хранилище токенов deeplink-ссылок с TTL
-    def __init__(self, ttl_seconds: int = 300) -> None:  # Конструктор принимает TTL в секундах
-        self.ttl_seconds = ttl_seconds  # Сохраняем время жизни токенов
-        self._storage: Dict[str, Tuple[float, dict]] = {}  # Словарь token -> (expires_at, payload)
-
-    def issue_token(self, payload: dict) -> str:  # Создаём и запоминаем новый токен
-        token = uuid.uuid4().hex  # Генерируем случайный токен
-        expires_at = time.time() + self.ttl_seconds  # Считаем время истечения токена
-        self._storage[token] = (expires_at, payload)  # Кладём payload вместе с временем истечения
-        logger.debug("LinkTokenStore: создан токен %s с истечением %s", token, expires_at)  # Логируем создание токена
-        return token  # Возвращаем токен для клиента
-
-    def get_payload(self, token: str) -> dict | None:  # Получаем payload по токену
-        record = self._storage.get(token)  # Ищем запись в словаре
-        if not record:  # Если записи нет
-            return None  # Возвращаем None
-        expires_at, payload = record  # Распаковываем запись
-        if time.time() > expires_at:  # Если TTL истёк
-            logger.debug("LinkTokenStore: токен %s устарел, удаляем", token)  # Сообщаем в лог
-            self._storage.pop(token, None)  # Удаляем запись
-            return None  # Возвращаем None
-        return payload  # Отдаём сохранённый payload
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-token_store = LinkTokenStore()  # Глобальное хранилище токенов для страницы редиректа
+# -----------------------------
+# TTL-хранилище токенов deeplink
+# -----------------------------
+class LinkTokenStore:
+    """Остаётся in-memory. Если нужно переживать рестарты/мультиинстанс — аналогично событиям переносится в БД."""
+
+    def __init__(self, ttl_seconds: int = 300) -> None:
+        self.ttl_seconds = ttl_seconds
+        self._storage: Dict[str, Tuple[float, dict]] = {}
+        self._lock = asyncio.Lock()  # на случай конкурентных обращений в одном event loop
+
+    async def issue_token(self, payload: dict) -> str:
+        token = uuid.uuid4().hex
+        expires_at = time.time() + self.ttl_seconds
+        async with self._lock:
+            self._storage[token] = (expires_at, payload)
+        return token
+
+    async def get_payload(self, token: str) -> dict | None:
+        async with self._lock:
+            record = self._storage.get(token)
+            if not record:
+                return None
+            expires_at, payload = record
+            if time.time() > expires_at:
+                self._storage.pop(token, None)
+                return None
+            return payload
 
 
-def _save_event_to_db(payload: dict) -> None:  # Пишем телеметрию о событиях Mini App в БД
-    from services.bot.database.storage import get_session  # Локальный импорт, чтобы не падать при отсутствии окружения
+token_store = LinkTokenStore()
 
-    transfer_id: str = str(payload.get("transfer_id") or "")  # Извлекаем transfer_id из пакета
-    inline_payload_json: str = json.dumps(payload.get("transfer_payload") or {}, ensure_ascii=False)  # Сохраняем исходный пакет
-    inline_context_json: str = json.dumps(  # Собираем контекст инлайна отдельно
+
+# -------------------------------------------------
+# TTL-кэш событий Mini App + чтение из inline_webapp_events
+# -------------------------------------------------
+@dataclass
+class WebAppEvent:
+    """
+    Нормализованный формат события, который возвращаем интеграции.
+    Поля в БД (DDL):
+      id (PK), transfer_id (UNIQUE), inline_payload_json (TEXT), inline_context_json (TEXT),
+      opener_tg_user_id (BIGINT), opener_json (TEXT), raw_init_data (TEXT), created_at (DATETIME)
+    """
+    db_id: int
+    transfer_id: str
+    transfer_payload: dict
+    inline_context: dict
+    opener_tg_user_id: Optional[int]
+    opener: dict
+    raw_init_data: str
+    created_at: Optional[str]  # ISO
+
+
+class WebAppEventStore:
+    """Read-through TTL-cache: cache -> DB -> cache."""
+
+    def __init__(self, ttl_seconds: int = 30) -> None:
+        self.ttl_seconds = ttl_seconds
+        self._storage: Dict[str, Tuple[float, WebAppEvent]] = {}
+        self._lock = asyncio.Lock()
+
+    async def put(self, transfer_id: str, event: WebAppEvent) -> None:
+        expires_at = time.time() + self.ttl_seconds
+        async with self._lock:
+            self._storage[transfer_id] = (expires_at, event)
+
+    async def get(self, transfer_id: str) -> Optional[WebAppEvent]:
+        async with self._lock:
+            record = self._storage.get(transfer_id)
+            if not record:
+                return None
+            expires_at, event = record
+            if time.time() > expires_at:
+                self._storage.pop(transfer_id, None)
+                return None
+            return event
+
+    async def invalidate(self, transfer_id: str) -> None:
+        async with self._lock:
+            self._storage.pop(transfer_id, None)
+
+
+event_store = WebAppEventStore(ttl_seconds=30)
+
+
+def _json_loads_safe(value: Any) -> dict:
+    """В DDL поля TEXT, поэтому обычно придёт str; но на всякий случай поддержим и dict."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        obj = json.loads(value)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _dt_to_iso(dt: Any) -> Optional[str]:
+    if isinstance(dt, datetime):
+        # created_at в MySQL без TZ. Возвращаем как UTC-like строку для интеграции.
+        return dt.isoformat() + "Z"
+    return None
+
+
+async def save_event_to_db(payload: dict) -> None:
+    """
+    UPSERT в inline_webapp_events по UNIQUE(transfer_id).
+    Поля opener_json/raw_init_data делаем NULL, если они пустые — это сохраняет смысл COALESCE.
+    """
+    transfer_id = str(payload.get("transfer_id") or "").strip()
+    if not transfer_id:
+        return
+
+    inline_payload_json = json.dumps(payload.get("transfer_payload") or {}, ensure_ascii=False)
+    inline_context_json = json.dumps(
         {
-            "creator_tg_user_id": payload.get("inline_creator_tg_user_id"),  # Автор инлайн-сообщения
-            "generated_at": payload.get("inline_generated_at"),  # Время генерации сообщения
-            "parsed": payload.get("inline_parsed") or {},  # Распарсенный контент
-            "option": payload.get("inline_option") or {},  # Выбранная опция перевода
+            "creator_tg_user_id": payload.get("inline_creator_tg_user_id"),
+            "generated_at": payload.get("inline_generated_at"),
+            "parsed": payload.get("inline_parsed") or {},
+            "option": payload.get("inline_option") or {},
         },
         ensure_ascii=False,
     )
 
-    opener = (payload.get("initDataUnsafe") or {}).get("user") or {}  # Достаём информацию об открывшем Mini App
-    opener_tg_user_id = opener.get("id")  # Telegram ID открывшего
-    opener_json = json.dumps(opener, ensure_ascii=False)  # Полный объект открывшего
-    raw_init_data: str = payload.get("initData") or ""  # Сырая строка initData
+    opener = (payload.get("initDataUnsafe") or {}).get("user") or {}
+    opener_tg_user_id = opener.get("id") if opener else None
+    opener_json = json.dumps(opener, ensure_ascii=False) if opener else None
 
-    sql = text(  # Формируем UPSERT для таблицы inline_webapp_events
+    raw_init_data = (payload.get("initData") or "").strip()
+    raw_init_data = raw_init_data if raw_init_data else None
+
+    sql = text(
         """
         INSERT INTO inline_webapp_events
-            (transfer_id, inline_payload_json, inline_context_json, opener_tg_user_id, opener_json, raw_init_data, created_at)
+            (transfer_id, inline_payload_json, inline_context_json,
+             opener_tg_user_id, opener_json, raw_init_data, created_at)
         VALUES
-            (:transfer_id, :inline_payload_json, :inline_context_json, :opener_tg_user_id, :opener_json, :raw_init_data, CURRENT_TIMESTAMP)
+            (:transfer_id, :inline_payload_json, :inline_context_json,
+             :opener_tg_user_id, :opener_json, :raw_init_data, CURRENT_TIMESTAMP)
         ON DUPLICATE KEY UPDATE
             inline_payload_json = VALUES(inline_payload_json),
             inline_context_json = VALUES(inline_context_json),
@@ -86,7 +192,7 @@ def _save_event_to_db(payload: dict) -> None:  # Пишем телеметрию
         """
     )
 
-    params = {  # Параметры для подстановки в SQL
+    params = {
         "transfer_id": transfer_id,
         "inline_payload_json": inline_payload_json,
         "inline_context_json": inline_context_json,
@@ -95,96 +201,176 @@ def _save_event_to_db(payload: dict) -> None:  # Пишем телеметрию
         "raw_init_data": raw_init_data,
     }
 
-    try:  # Пытаемся записать событие
-        with get_session() as session:  # Открываем сессию SQLAlchemy
-            session.execute(sql, params)  # Выполняем UPSERT
-        logger.info("WebApp API: событие %s записано в БД", transfer_id)  # Логируем успешную запись
-    except SQLAlchemyError as exc:  # Ловим ошибки БД
-        logger.warning("WebApp API: ошибка БД при сохранении transfer_id=%s: %s", transfer_id, exc)  # Сообщаем о проблеме
-    except Exception as exc:  # Ловим любые другие исключения
-        logger.warning("WebApp API: неожиданная ошибка при сохранении transfer_id=%s: %s", transfer_id, exc)  # Пишем предупреждение
+    try:
+        async with get_session() as session:
+            print('Данные записаны')
+            await session.execute(sql, params)
+        logger.info("WebApp API: event upsert ok transfer_id=%s", transfer_id)
+    except Exception as exc:
+        # Важно: ошибки БД не должны ломать фронт/миниапп
+        logger.warning("WebApp API: DB write error transfer_id=%s: %s", transfer_id, exc)
 
 
-def base64_decode(value: str) -> str:  # Вспомогательная функция для base64url
-    import base64  # Импортируем локально, чтобы не засорять глобальные импорты
+async def fetch_event_from_db(transfer_id: str) -> Optional[WebAppEvent]:
+    """SELECT по transfer_id (UNIQUE) из inline_webapp_events."""
+    transfer_id = str(transfer_id or "").strip()
+    if not transfer_id:
+        return None
 
-    decoded_bytes = base64.b64decode(value.encode("utf-8"))  # Декодируем строку в байты
-    return decoded_bytes.decode("utf-8")  # Превращаем байты обратно в строку
+    sql = text(
+        """
+        SELECT
+            id,
+            transfer_id,
+            inline_payload_json,
+            inline_context_json,
+            opener_tg_user_id,
+            opener_json,
+            raw_init_data,
+            created_at
+        FROM inline_webapp_events
+        WHERE transfer_id = :transfer_id
+        LIMIT 1
+        """
+    )
+
+    try:
+        async with get_session() as session:
+            row = (await session.execute(sql, {"transfer_id": transfer_id})).mappings().first()
+    except Exception as exc:
+        logger.warning("WebApp API: DB read error transfer_id=%s: %s", transfer_id, exc)
+        return None
+
+    if not row:
+        return None
+
+    transfer_payload = _json_loads_safe(row.get("inline_payload_json"))
+    inline_context = _json_loads_safe(row.get("inline_context_json"))
+    opener = _json_loads_safe(row.get("opener_json"))
+
+    return WebAppEvent(
+        db_id=int(row["id"]),
+        transfer_id=str(row["transfer_id"]),
+        transfer_payload=transfer_payload,
+        inline_context=inline_context,
+        opener_tg_user_id=int(row["opener_tg_user_id"]) if row.get("opener_tg_user_id") is not None else None,
+        opener=opener,
+        raw_init_data=str(row.get("raw_init_data") or ""),
+        created_at=_dt_to_iso(row.get("created_at")),
+    )
 
 
-def decode_transfer_payload(start_param: str) -> dict:  # Раскодируем start_param, чтобы узнать тип реквизита
-    if not start_param:  # Если параметр пустой
-        return {}  # Возвращаем пустой словарь
-    try:  # Пробуем декодировать base64url → JSON
-        normalized = start_param.replace("-", "+").replace("_", "/")  # Возвращаем стандартные символы base64
-        padding = "=" * ((4 - len(normalized) % 4) % 4)  # Считаем недостающие символы '='
-        decoded = json.loads(base64_decode(normalized + padding))  # Превращаем JSON-строку в объект
-        return decoded if isinstance(decoded, dict) else {}  # Возвращаем dict, иначе пустой объект
-    except Exception as exc:  # Если что-то пошло не так
-        logger.debug("WebApp API: не удалось раскодировать transfer_id %s: %s", start_param, exc)  # Логируем проблему
-        return {}  # Возвращаем пустой объект
+def _build_event_from_post(payload: dict) -> Optional[WebAppEvent]:
+    """
+    Нормализуем входящее POST-событие в формат WebAppEvent.
+    db_id неизвестен (событие может ещё не быть записано), поэтому ставим 0.
+    """
+    transfer_id = str(payload.get("transfer_id") or "").strip()
+    if not transfer_id:
+        return None
+
+    transfer_payload = payload.get("transfer_payload") or {}
+    inline_context = {
+        "creator_tg_user_id": payload.get("inline_creator_tg_user_id"),
+        "generated_at": payload.get("inline_generated_at"),
+        "parsed": payload.get("inline_parsed") or {},
+        "option": payload.get("inline_option") or {},
+    }
+
+    opener = (payload.get("initDataUnsafe") or {}).get("user") or {}
+    opener_tg_user_id = opener.get("id") if opener else None
+
+    return WebAppEvent(
+        db_id=0,
+        transfer_id=transfer_id,
+        transfer_payload=transfer_payload if isinstance(transfer_payload, dict) else {},
+        inline_context=inline_context,
+        opener_tg_user_id=opener_tg_user_id,
+        opener=opener if isinstance(opener, dict) else {},
+        raw_init_data=str(payload.get("initData") or ""),
+        created_at=datetime.utcnow().isoformat() + "Z",
+    )
 
 
-def detect_identifier(transfer_id: str, payload: dict) -> Tuple[str, str]:  # Определяем тип и значение реквизита
-    option = payload.get("option") or {}  # Берём опцию из полезной нагрузки
-    if "phone" in option:  # Если в опции есть телефон
-        return "phone", str(option.get("phone"))  # Возвращаем тип phone и его значение
-    if "card" in option:  # Если есть карта
-        return "card", str(option.get("card"))  # Возвращаем тип card и значение
-
-    digits_only = "".join(ch for ch in transfer_id if ch.isdigit() or ch == "+")  # Фильтруем transfer_id до цифр
-    if len(digits_only) >= 10 and len(digits_only) <= 15:  # Если похоже на телефон
-        return "phone", digits_only  # Возвращаем тип phone
-    if len(digits_only) >= 16:  # Если похоже на карту
-        return "card", digits_only  # Возвращаем тип card
-
-    raise ValueError("Невозможно определить тип идентификатора")  # Сообщаем о невозможности распознать реквизит
+# ---------------------------------------------
+# Логика генерации банковских ссылок (как раньше)
+# ---------------------------------------------
+def base64_decode(value: str) -> str:
+    import base64
+    return base64.b64decode(value.encode("utf-8")).decode("utf-8")
 
 
-def load_banks_config() -> List[dict]:  # Загружаем banks.json из конфигурации
-    config_path = Path(__file__).parent / "config" / "banks.json"  # Формируем путь до файла
-    with config_path.open("r", encoding="utf-8") as fp:  # Открываем файл в кодировке UTF-8
-        return json.load(fp)  # Парсим JSON и возвращаем список банков
+def decode_transfer_payload(start_param: str) -> dict:
+    if not start_param:
+        return {}
+    try:
+        normalized = start_param.replace("-", "+").replace("_", "/")
+        padding = "=" * ((4 - len(normalized) % 4) % 4)
+        decoded = json.loads(base64_decode(normalized + padding))
+        return decoded if isinstance(decoded, dict) else {}
+    except Exception:
+        return {}
 
 
-def build_links_for_transfer(transfer_id: str) -> Tuple[List[dict], List[str]]:  # Генерируем ссылки для всех банков
-    payload = decode_transfer_payload(transfer_id)  # Пытаемся распаковать transfer_id
-    identifier_type, identifier_value = detect_identifier(transfer_id, payload)  # Определяем тип реквизита
+def detect_identifier(transfer_id: str, payload: dict) -> Tuple[str, str]:
+    option = payload.get("option") or {}
+    if "phone" in option:
+        return "phone", str(option.get("phone"))
+    if "card" in option:
+        return "card", str(option.get("card"))
 
-    banks = load_banks_config()  # Читаем метаданные банков из файла
-    results: List[dict] = []  # Список ответов по банкам
-    errors: List[str] = []  # Список ошибок для диагностики
+    digits_only = "".join(ch for ch in transfer_id if ch.isdigit() or ch == "+")
+    if 10 <= len(digits_only) <= 15:
+        return "phone", digits_only
+    if len(digits_only) >= 16:
+        return "card", digits_only
+    raise ValueError("Невозможно определить тип идентификатора")
 
-    for bank in banks:  # Перебираем все банки из конфигурации
-        bank_id = bank.get("id") or "unknown"  # Забираем id банка
-        close_only = bool(bank.get("close_only"))  # Узнаём, нужно ли только закрывать Mini App без ссылок
-        supported = bank.get("supported_identifiers") or []  # Узнаём поддерживаемые типы реквизитов
 
-        if close_only:  # Если банк пока работает как заглушка
-            results.append(  # Сразу добавляем его в итоговый список
+def load_banks_config() -> List[dict]:
+    config_path = Path(__file__).parent / "config" / "banks.json"
+    with config_path.open("r", encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+async def build_links_for_transfer(transfer_id: str) -> Tuple[List[dict], List[str]]:
+    payload = decode_transfer_payload(transfer_id)
+    identifier_type, identifier_value = detect_identifier(transfer_id, payload)
+
+    banks = load_banks_config()
+    results: List[dict] = []
+    errors: List[str] = []
+
+    for bank in banks:
+        bank_id = bank.get("id") or "unknown"
+        close_only = bool(bank.get("close_only"))
+        supported = bank.get("supported_identifiers") or []
+
+        if close_only:
+            results.append(
                 {
-                    "bank_id": bank_id,  # Возвращаем id банка
-                    "title": bank.get("title", "Банк"),  # Название для кнопки
-                    "logo": bank.get("logo", ""),  # Путь к логотипу
-                    "notes": bank.get("notes", ""),  # Дополнительное описание
-                    "close_only": True,  # Флаг для фронта, что нужно просто закрыть Mini App
-                    "link_id": bank.get("id", bank_id),  # Устанавливаем link_id для логирования
-                    "link_token": "",  # Токен пустой, так как редирект не нужен
-                    "deeplink": "",  # Deeplink отсутствует
-                    "fallback_url": "",  # Fallback тоже отсутствует
+                    "bank_id": bank_id,
+                    "title": bank.get("title", "Банк"),
+                    "logo": bank.get("logo", ""),
+                    "notes": bank.get("notes", ""),
+                    "close_only": True,
+                    "link_id": bank.get("id", bank_id),
+                    "link_token": "",
+                    "deeplink": "",
+                    "fallback_url": "",
                 }
             )
-            continue  # Переходим к следующему банку
+            continue
 
-        if identifier_type not in supported:  # Если данный банк не умеет обрабатывать тип реквизита
-            continue  # Пропускаем банк
+        if identifier_type not in supported:
+            continue
 
-        builder = get_builder(bank.get("builder", ""))  # Ищем конструктор по имени
-        if not builder:  # Если конструктор не найден
-            errors.append(f"builder not found for {bank_id}")  # Записываем ошибку
-            continue  # Переходим к следующему банку
+        builder = get_builder(bank.get("builder", ""))
+        if not builder:
+            errors.append(f"builder not found for {bank_id}")
+            continue
 
-        request_payload: LinkBuilderRequest = {  # Готовим payload для конструктора
+        request_payload: LinkBuilderRequest = {
             "identifier_type": identifier_type,
             "identifier_value": identifier_value,
             "amount": str((payload.get("option") or {}).get("amount") or ""),
@@ -192,135 +378,156 @@ def build_links_for_transfer(transfer_id: str) -> Tuple[List[dict], List[str]]: 
             "extra": payload,
         }
 
-        try:  # Пытаемся собрать ссылку
-            built = builder(request_payload)  # Вызываем конструктор
-        except Exception as exc:  # Ловим любые ошибки конструктора
-            logger.warning("WebApp API: ошибка сборки ссылки для %s: %s", bank_id, exc)  # Логируем проблему
-            errors.append(f"builder failed for {bank_id}")  # Добавляем ошибку
-            fallback_payload = {  # Готовим безопасный fallback с пустым deeplink
-                "bank_id": bank_id,
-                "title": bank.get("title", "Банк"),
-                "logo": bank.get("logo", ""),
-                "notes": bank.get("notes", ""),
-                "deeplink": "",
-                "fallback_url": "https://www.google.com",
-                "link_id": f"fallback:{bank_id}",
-                "link_token": token_store.issue_token(
-                    {
-                        "bank_id": bank_id,
-                        "deeplink": "",
-                        "fallback_url": "https://www.google.com",
-                        "transfer_id": transfer_id,
-                    }
-                ),
-            }
-            results.append(fallback_payload)  # Добавляем fallback в список
-            continue  # Переходим к следующему банку
+        try:
+            built = builder(request_payload)
+        except Exception as exc:
+            logger.warning("WebApp API: builder error for %s: %s", bank_id, exc)
+            errors.append(f"builder failed for {bank_id}")
+            built = {"deeplink": "", "fallback_url": "https://www.google.com", "link_id": f"fallback:{bank_id}"}
 
-        token_payload = {  # Собираем payload для токена редиректа
+        token_payload = {
             "bank_id": bank_id,
             "deeplink": built.get("deeplink") or "",
             "fallback_url": built.get("fallback_url") or "",
             "transfer_id": transfer_id,
         }
-        token = token_store.issue_token(token_payload)  # Создаём токен и кладём в хранилище
+        token = await token_store.issue_token(token_payload)
 
-        result_item = {  # Формируем итоговый объект для фронтенда
-            "bank_id": bank_id,
-            "title": bank.get("title", "Банк"),
-            "logo": bank.get("logo", ""),
-            "notes": bank.get("notes", ""),
-            "link_id": built.get("link_id", bank_id),
-            "link_token": token,
-            "deeplink": built.get("deeplink", ""),
-            "fallback_url": built.get("fallback_url", ""),
+        results.append(
+            {
+                "bank_id": bank_id,
+                "title": bank.get("title", "Банк"),
+                "logo": bank.get("logo", ""),
+                "notes": bank.get("notes", ""),
+                "link_id": built.get("link_id", bank_id),
+                "link_token": token,
+                "deeplink": built.get("deeplink", ""),
+                "fallback_url": built.get("fallback_url", ""),
+            }
+        )
+
+    return results, errors
+
+
+# -----------------------------
+# HTTP Handlers (aiohttp)
+# -----------------------------
+async def handle_post_webapp(request: web.Request) -> web.Response:
+    """
+    Принимаем событие Mini App:
+    - прогреваем TTL-кэш (быстро для polling)
+    - пишем в БД (UPSERT)
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid json"}, status=400)
+
+    # 1) TTL-cache (не блокирует интеграцию, даже если БД недоступна)
+    ev = _build_event_from_post(payload)
+    if ev:
+        await event_store.put(ev.transfer_id, ev)
+
+    # 2) DB write (ошибки подавляем внутри save_event_to_db)
+    await save_event_to_db(payload)
+
+    return web.Response(status=202)
+
+
+async def handle_get_webapp(request: web.Request) -> web.Response:
+    """
+    Получение события по transfer_id:
+    1) TTL-cache
+    2) DB
+    3) прогрев TTL-cache
+    """
+    transfer_id = (request.query.get("transfer_id") or "").strip()
+    if not transfer_id:
+        return web.json_response({"error": "transfer_id is required"}, status=400)
+
+    include_raw = (request.query.get("include_raw") or "0").lower() in ("1", "true", "yes")
+
+    # 1) cache
+    cached = await event_store.get(transfer_id)
+    if cached:
+        out = {
+            "id": cached.db_id,
+            "transfer_id": cached.transfer_id,
+            "transfer_payload": cached.transfer_payload,
+            "inline_context": cached.inline_context,
+            "opener_tg_user_id": cached.opener_tg_user_id,
+            "opener": cached.opener,
+            "created_at": cached.created_at,
+            "source": "cache",
         }
-        results.append(result_item)  # Добавляем объект в список результатов
+        if include_raw:
+            out["raw_init_data"] = cached.raw_init_data
+        return web.json_response(out)
 
-    return results, errors  # Возвращаем сформированные ссылки и ошибки
+    # 2) db
+    db_event = await fetch_event_from_db(transfer_id)
+    if not db_event:
+        return web.json_response({"error": "event not found"}, status=404)
+
+    # 3) warm cache
+    await event_store.put(transfer_id, db_event)
+
+    out = {
+        "id": db_event.db_id,
+        "transfer_id": db_event.transfer_id,
+        "transfer_payload": db_event.transfer_payload,
+        "inline_context": db_event.inline_context,
+        "opener_tg_user_id": db_event.opener_tg_user_id,
+        "opener": db_event.opener,
+        "created_at": db_event.created_at,
+        "source": "db",
+    }
+    if include_raw:
+        out["raw_init_data"] = db_event.raw_init_data
+
+    return web.json_response(out)
 
 
-class WebAppEventHandler(BaseHTTPRequestHandler):  # Основной обработчик HTTP-запросов
-    def _send_json(self, payload: dict, status_code: int = 200) -> None:  # Отправляем JSON-ответ
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")  # Сериализуем payload в байты
-        self.send_response(status_code)  # Ставим HTTP-статус
-        self.send_header("Content-Type", "application/json; charset=utf-8")  # Указываем тип содержимого
-        self.send_header("Content-Length", str(len(body)))  # Передаём длину тела
-        self.end_headers()  # Закрываем заголовки
-        self.wfile.write(body)  # Пишем тело ответа
+async def handle_get_links(request: web.Request) -> web.Response:
+    transfer_id = (request.query.get("transfer_id") or "").strip()
+    if not transfer_id:
+        return web.json_response({"error": "transfer_id is required"}, status=400)
 
-    def do_POST(self) -> None:  # Обрабатываем POST-запросы
-        if self.path != "/api/webapp":  # Проверяем путь
-            self.send_response(404)  # Если путь неизвестен — отдаём 404
-            self.end_headers()  # Закрываем заголовки
-            return  # Завершаем обработку
+    try:
+        links, errors = await build_links_for_transfer(transfer_id)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except Exception as exc:
+        logger.warning("WebApp API: internal error in links: %s", exc)
+        return web.json_response({"error": "internal_error"}, status=500)
 
-        content_length = int(self.headers.get("content-length", 0))  # Узнаём длину тела запроса
-        raw_body = self.rfile.read(content_length) if content_length > 0 else b""  # Читаем тело запроса
-
-        try:  # Пробуем распарсить JSON
-            payload = json.loads(raw_body.decode("utf-8") or "{}")  # Получаем словарь из тела
-        except json.JSONDecodeError:  # Если JSON некорректный
-            self.send_response(400)  # Отдаём 400 Bad Request
-            self.end_headers()  # Закрываем заголовки
-            return  # Завершаем обработку
-
-        _save_event_to_db(payload)  # Пишем событие в БД (без падения при ошибках)
-
-        self.send_response(202)  # Возвращаем 202 Accepted
-        self.end_headers()  # Закрываем заголовки
-
-    def do_GET(self) -> None:  # Обрабатываем GET-запросы
-        parsed = urlparse(self.path)  # Разбираем URL
-        if parsed.path == "/api/links":  # Эндпоинт для получения списка ссылок
-            return self._handle_links_list(parsed)  # Передаём управление в отдельный метод
-        if parsed.path.startswith("/api/links/"):  # Эндпоинт для получения ссылки по токену
-            token = parsed.path.split("/api/links/")[-1]  # Извлекаем токен из пути
-            return self._handle_link_token(token)  # Обрабатываем запрос
-
-        self.send_response(404)  # Неизвестный путь — 404
-        self.end_headers()  # Закрываем заголовки
-
-    def _handle_links_list(self, parsed) -> None:  # Обрабатываем GET /api/links
-        query = parse_qs(parsed.query)  # Разбираем query-параметры
-        transfer_id = (query.get("transfer_id") or [""])[0]  # Извлекаем transfer_id
-        if not transfer_id:  # Если параметр не передан
-            return self._send_json({"error": "transfer_id is required"}, status_code=400)  # Возвращаем ошибку
-
-        try:  # Пытаемся построить ссылки
-            links, errors = build_links_for_transfer(transfer_id)  # Генерируем deeplink-объекты
-        except ValueError as exc:  # Если не удалось определить реквизиты
-            return self._send_json({"error": str(exc)}, status_code=400)  # Возвращаем 400 с описанием
-        except Exception as exc:  # Если возникла неожиданная ошибка
-            logger.warning("WebApp API: внутренний сбой при сборке ссылок %s", exc)  # Логируем проблему
-            return self._send_json({"error": "internal_error"}, status_code=500)  # Отдаём 500
-
-        response = {  # Готовим ответ для фронтенда
+    return web.json_response(
+        {
             "transfer_id": transfer_id,
             "generated_at": datetime.utcnow().isoformat() + "Z",
             "links": links,
             "errors": errors,
         }
-        return self._send_json(response)  # Отправляем JSON-ответ
-
-    def _handle_link_token(self, token: str) -> None:  # Обрабатываем GET /api/links/{token}
-        payload = token_store.get_payload(token)  # Пытаемся найти токен в хранилище
-        if not payload:  # Если токен не найден или устарел
-            return self._send_json({"error": "token not found"}, status_code=404)  # Возвращаем 404
-
-        return self._send_json(payload)  # Отправляем deeplink и fallback
+    )
 
 
-def run_server() -> None:  # Точка запуска сервера
-    server = HTTPServer(("0.0.0.0", 8080), WebAppEventHandler)  # Создаём HTTP-сервер на 8080 порту
-    logger.info("WebApp API: сервер запущен на http://0.0.0.0:8080")  # Сообщаем адрес сервера
-    try:  # Запускаем цикл обработки запросов
-        server.serve_forever()  # Работаем бесконечно
-    except KeyboardInterrupt:  # Корректно завершаем по Ctrl+C
-        logger.info("WebApp API: остановка по сигналу клавиатуры")  # Логируем остановку
-    finally:  # В любом случае закрываем сервер
-        server.server_close()  # Освобождаем порт
+async def handle_get_link_token(request: web.Request) -> web.Response:
+    token = request.match_info.get("token", "")
+    payload = await token_store.get_payload(token)
+    if not payload:
+        return web.json_response({"error": "token not found"}, status=404)
+    return web.json_response(payload)
 
 
-if __name__ == "__main__":  # Запуск из командной строки
-    run_server()  # Стартуем HTTP-сервер
+def create_app() -> web.Application:
+    app = web.Application()
+    app.router.add_post("/api/webapp", handle_post_webapp)
+    app.router.add_get("/api/webapp", handle_get_webapp)
+
+    app.router.add_get("/api/links", handle_get_links)
+    app.router.add_get("/api/links/{token}", handle_get_link_token)
+    return app
+
+
+if __name__ == "__main__":
+    web.run_app(create_app(), host="0.0.0.0", port=8080)
