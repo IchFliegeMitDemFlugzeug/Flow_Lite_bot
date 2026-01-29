@@ -3,3 +3,4 @@ phonenumbers~=9.0.19
 sqlalchemy~=2.0.41
 pymysql
 cryptography
+asyncmy

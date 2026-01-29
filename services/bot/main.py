@@ -23,7 +23,7 @@ settings_cards_router
 from .handlers.inline_mode.inline_query import (
     inline_mode_router
 )
-from bot.tools.global_guard import (                    # Импортируем глобальный роутер-фильтр
+from .tools.global_guard import (                    # Импортируем глобальный роутер-фильтр
     global_guard_router,                                # Роутер, который чистит "левые" сообщения
 )
 
