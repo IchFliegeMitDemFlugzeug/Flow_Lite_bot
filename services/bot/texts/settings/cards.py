@@ -134,6 +134,23 @@ def build_add_card_receipt_request_text() -> str:
     return "\n".join(wrapped_lines)                                  # Возвращаем готовый текст
 
 
+def build_add_card_saved_text(*, bank_title: str, payment_system: str, masked_card: str) -> str:
+    """Сформировать текст успешного добавления карты."""
+
+    safe_bank_title: str = bank_title or "банк не определён"          # Если банк не найден, честно показываем это пользователю
+    safe_payment_system: str = payment_system or "платёжная система не определена"  # Запасной текст для платёжной системы
+    safe_masked_card: str = masked_card or "****"                    # Показываем только безопасную маску карты
+
+    lines: List[str] = []                                            # Создаём список строк будущего сообщения
+    lines.append(f"Карта *{safe_bank_title}* *{safe_payment_system}* {safe_masked_card} добавлена!")
+    lines.append("Теперь Вы можете принимать на неё оплату.")
+    lines.append("")
+    lines.append("⚠️ Если банк определился неверно, удалите карту и добавьте её заново после проверки номера.")
+
+    wrapped_lines = [_wrap_with_indent(line) for line in lines]      # Применяем общий перенос строк проекта
+    return "\n".join(wrapped_lines)                                  # Возвращаем Markdown-текст
+
+
 async def build_cards_settings_text(
     user_id: int,                                                    # ID пользователя (одновременно имя JSON-файла в БД)
 ) -> str:
