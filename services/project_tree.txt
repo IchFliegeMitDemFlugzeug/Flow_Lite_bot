@@ -1,5 +1,8 @@
 services
 ├── bot
+│   ├── config
+│   │   ├── bin_cache.json
+│   │   └── bin_db.json
 │   ├── database
 │   │   ├── __init__.py
 │   │   ├── api_functions
@@ -82,6 +85,7 @@ services
 │   │   │   └── query_parser.py
 │   │   ├── __init__.py
 │   │   ├── banks_wordbook.py
+│   │   ├── bin_lookup.py
 │   │   ├── global_guard.py
 │   │   ├── info_links.py
 │   │   ├── phone_utils.py
