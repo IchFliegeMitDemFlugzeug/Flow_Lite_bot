@@ -1,0 +1,29 @@
+{
+  "22022000": {
+    "payment_system": "mir",
+    "bank_name": "Сбербанк",
+    "bank_id": "sber",
+    "country": "RU",
+    "card_type": "debit",
+    "card_level": "",
+    "source": "manual_test"
+  },
+  "427638": {
+    "payment_system": "visa",
+    "bank_name": "ВТБ",
+    "bank_id": "vtb",
+    "country": "RU",
+    "card_type": "debit",
+    "card_level": "",
+    "source": "manual_test"
+  },
+  "555555": {
+    "payment_system": "mastercard",
+    "bank_name": "Т-Банк",
+    "bank_id": "tbank",
+    "country": "RU",
+    "card_type": "debit",
+    "card_level": "",
+    "source": "manual_test"
+  }
+}
