@@ -1,25 +1,6 @@
 services
-├── WebApp
-│   ├── LOGO.png
-│   ├── LOGO_ALFABANK.png
-│   ├── LOGO_GAZPROMBANK.png
-│   ├── LOGO_MKB.png
-│   ├── LOGO_MTSBANK.png
-│   ├── LOGO_POCHTABANK.png
-│   ├── LOGO_PSB.png
-│   ├── LOGO_RSHB.png
-│   ├── LOGO_SBER.png
-│   ├── LOGO_SOVKOMBANK.png
-│   ├── LOGO_TBANK.png
-│   ├── LOGO_VTB.png
-│   ├── background.png
-│   └── index.html
 ├── bot
 │   ├── database
-│   │   ├── users
-│   │   │   ├── 1622929490.json
-│   │   │   ├── 445952203.json
-│   │   │   └── 8540412036.json
 │   │   ├── __init__.py
 │   │   ├── api_functions
 │   │   ├── models.py
@@ -63,6 +44,18 @@ services
 │   │   ├── __init__.py
 │   │   ├── personal_cabinet.py
 │   │   └── registration.py
+│   ├── routers
+│   │   ├── cabinet
+│   │   │   └── settings
+│   │   │       ├── cards
+│   │   │       │   ├── add_card
+│   │   │       │   └── sel_card_to_del
+│   │   │       └── phone_numbers
+│   │   │           ├── add_phone_number
+│   │   │           ├── main_bank
+│   │   │           ├── remove_add_bank
+│   │   │           └── sel_number_to_del
+│   │   └── inline_mode
 │   ├── states
 │   │   ├── settings
 │   │   │   ├── __init__.py
